@@ -1,3 +1,3 @@
 # SecuritasSimulatio
 
-Cybersecurity tabletop simulation engine and tool.
+Cybersecurity tabletop simulation engine and tool for facilitation.
