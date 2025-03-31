@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cybersecurity Tabletop Creator</title>
+</head>
+<body>
+    <h1>Create Cybersecurity Tabletop</h1>
+    <form id="tabletopForm">
+        <div>
+            <label>IP Ranges (one per line):</label><br>
+            <textarea name="ip_ranges" rows="4"></textarea>
+        </div>
+        <div>
+            <label>Departments (comma-separated):</label><br>
+            <input type="text" name="departments">
+        </div>
+        <div>
+            <label>Technologies (comma-separated):</label><br>
+            <input type="text" name="technologies">
+        </div>
+        <div>
+            <label>Incident Date/Time:</label><br>
+            <input type="datetime-local" name="incident_time">
+        </div>
+        <div>
+            <label><input type="checkbox" id="manualTTPs"> Manual TTPs</label>
+            <div id="manualTTPsSection" style="display:none">
+                <textarea name="manual_ttps" rows="4" placeholder="TTPs (one per line)"></textarea>
+                <textarea name="description" rows="4" placeholder="Description"></textarea>
+            </div>
+        </div>
+        <button type="submit">Create Tabletop</button>
+    </form>
+
+    <script>
+        document.getElementById('manualTTPs').addEventListener('change', function() {
+            document.getElementById('manualTTPsSection').style.display = this.checked ? 'block' : 'none';
+        });
+
+        document.getElementById('tabletopForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const data = Object.fromEntries(formData);
+            data.ip_ranges = data.ip_ranges.split('\n');
+            data.departments = data.departments.split(',');
+            data.technologies = data.technologies.split(',');
+            if (data.manual_ttps) data.manual_ttps = data.manual_ttps.split('\n');
+
+            const response = await fetch('/api/create_tabletop', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(data)
+            });
+            const result = await response.json();
+            alert(`Tabletop created: ${result.filename}`);
+        });
+    </script>
+</body>
+</html>
