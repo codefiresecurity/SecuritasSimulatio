@@ -7,13 +7,18 @@ from typing import Dict, List, Optional
 import io
 import re
 import matplotlib.patches as mpatches  # Added for legend
+import os
+from dotenv import load_dotenv
 
-# Database connection
+DB_HOST = os.getenv("DB_HOST")
+DB_USER = os.getenv("DB_USER")
+DB_PASS = os.getenv("DB_PASS")
+DB = os.getenv("DB")
 def connect_to_db(
-    host: str = "10.5.10.101",
-    user: str = "rwessels",
-    password: str = "Division113!",
-    database: str = "mitre"
+    host: str = DB_HOST,
+    user: str = DB_USER,
+    password: str = DB_PASS,
+    database: str = DB
 ) -> mysql.connector.connection.MySQLConnection:
     """Establish a connection to the MySQL database."""
     return mysql.connector.connect(
