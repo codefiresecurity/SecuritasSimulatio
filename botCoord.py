@@ -17,13 +17,16 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN")
-OLLAMA_URL = os.getenv("OLLAMA_URL")
+GUILD_ID = os.getenv("GUILD_ID")  # Optional: test server ID
+OLLAMA_URL = "http://your-ollama-ip:11434/api/generate"  # Replace with your Ollama server IP
 
 # Set up Discord client with intents
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
 tree = app_commands.CommandTree(client)
+
+logger.info("Script started: Defining functions")
 
 # Efficient string splitting
 def split_message(text: str, max_length: int = 1500) -> List[str]:
@@ -40,6 +43,96 @@ async def send_response(interaction: discord.Interaction, message: str):
         await interaction.response.send_message(chunks[0])
         for chunk in chunks[1:]:
             await interaction.followup.send(chunk)
+
+# Tabletop Command Logic (simplified for testing)
+async def collect_tabletop_data(user: discord.User, dm_channel: discord.DMChannel) -> Dict:
+    """Collect tabletop exercise data from the user via DM."""
+    data = {}
+    def check(m):
+        return m.author == user and m.channel == dm_channel
+    await dm_channel.send("Please specify the day of the week and time of day (e.g., 'Monday morning'):")
+    msg = await client.wait_for('message', check=check, timeout=300.0)
+    data['day_time'] = msg.content.strip()
+    return data
+
+async def generate_tabletop_document(data: Dict) -> str:
+    """Generate tabletop document by querying Ollama and return as Markdown."""
+    return "## Test Document\nGenerated for: " + data['day_time']
+
+# Discord Events
+@client.event
+async def on_ready():
+    logger.info(f'{client.user} has connected to Discord!')
+    try:
+        if GUILD_ID:
+            guild = discord.Object(id=int(GUILD_ID))
+            await tree.sync(guild=guild)
+            logger.info(f"Slash commands synced to guild {GUILD_ID}")
+            commands = tree.get_commands(guild=guild)
+        else:
+            await tree.sync()
+            logger.info("Slash commands synced globally")
+            commands = tree.get_commands()
+        logger.info(f"Registered commands: {[cmd.name for cmd in commands]}")
+    except Exception as e:
+        logger.error(f"Failed to sync commands: {e}")
+
+# Slash Commands
+logger.info("Defining slash commands")
+
+try:
+    @tree.command(name="create-tabletop", description="Test command for tabletop creation")
+    async def create_tabletop(interaction: discord.Interaction):
+        logger.info("Command registered and executed: create-tabletop")
+        await interaction.response.send_message("Test: Tabletop command works!", ephemeral=True)
+except Exception as e:
+    logger.error(f"Error defining create-tabletop: {e}")
+
+@tree.command(name="attack", description="Query MITRE ATT&CK data")
+@app_commands.describe(
+    query_type="Type of query (ttp, group, software, campaign, graph)",
+    method="For TTP: id, search, or detail (optional)",
+    query="The ID or name to search for"
+)
+async def attack(interaction: discord.Interaction, query_type: str, method: str = None, query: str = None):
+    logger.info("Command registered: attack")
+    query_type = query_type.lower()
+    handlers = {
+        'ttp': handle_ttp,
+        'group': handle_group,
+        'software': handle_software,
+        'campaign': handle_campaign,
+        'graph': handle_graph
+    }
+    if query_type not in handlers:
+        await interaction.response.send_message("Invalid query type. Use `ttp`, `group`, `software`, `campaign`, or `graph`.")
+        return
+    if query_type == 'ttp':
+        if not method:
+            await interaction.response.send_message("For TTP, specify a method: `id`, `search`, or `detail`.")
+            return
+        if not query:
+            await interaction.response.send_message("Please provide a query for TTP.")
+            return
+        await handle_ttp(interaction, method, query)
+    else:
+        if not query:
+            await interaction.response.send_message("Please provide a query.")
+            return
+        await handlers[query_type](interaction, query)
+
+@tree.command(name="help", description="Show available commands")
+async def help_command(interaction: discord.Interaction):
+    logger.info("Command registered: help")
+    msg = (
+        "**/attack <query_type> [method] <query>** - Query MITRE ATT&CK data\n"
+        "- `query_type`: `ttp`, `group`, `software`, `campaign`, `graph`\n"
+        "- `method` (for `ttp` only): `id`, `search`, `detail`\n"
+        "- `query`: ID (e.g., T1059) or name\n"
+        "**/help** - Display this message\n"
+        "**/create-tabletop** - Start a DM to create a tabletop exercise document"
+    )
+    await interaction.response.send_message(msg)
 
 # Command handlers
 async def handle_ttp(interaction: discord.Interaction, method: str, query: str):
@@ -90,6 +183,7 @@ async def handle_campaign(interaction: discord.Interaction, query: str):
     await send_response(interaction, msg)
 
 async def handle_graph(interaction: discord.Interaction, query: str):
+    query = query.upper()  # Normalize query to uppercase
     await interaction.response.send_message("Generating graph, please wait...", ephemeral=True)
     img_buffer = graph.generate_graph(query)
     if img_buffer:
@@ -98,194 +192,6 @@ async def handle_graph(interaction: discord.Interaction, query: str):
     else:
         await interaction.followup.send(f"No linked items found for {query}")
 
-# Tabletop Command Logic
-async def collect_tabletop_data(user: discord.User, dm_channel: discord.DMChannel) -> Dict:
-    """Collect tabletop exercise data from the user via DM."""
-    data = {}
-    
-    def check(m):
-        return m.author == user and m.channel == dm_channel
-
-    await dm_channel.send("Please specify the day of the week and time of day (e.g., 'Monday morning', 'Friday night'):")
-    msg = await client.wait_for('message', check=check, timeout=300.0)
-    data['day_time'] = msg.content.strip()
-
-    await dm_channel.send("List the technologies in use (e.g., 'Fortinet, Microsoft AD, Cisco'):")
-    msg = await client.wait_for('message', check=check, timeout=300.0)
-    data['technologies'] = [tech.strip() for tech in msg.content.split(',')]
-
-    await dm_channel.send("How many injects do you want? (Enter a number):")
-    while True:
-        msg = await client.wait_for('message', check=check, timeout=300.0)
-        try:
-            data['num_injects'] = int(msg.content.strip())
-            if data['num_injects'] > 0:
-                break
-            await dm_channel.send("Please enter a positive number.")
-        except ValueError:
-            await dm_channel.send("Invalid input. Please enter a number.")
-
-    await dm_channel.send(
-        "Specify the attack basis:\n"
-        "- For TTP chain, list TTPs separated by commas (e.g., 'T1059, T1071')\n"
-        "- For software, group, or campaign, enter its ID (e.g., 'S0001', 'G0007', 'C0001')\n"
-        "What would you like to use?"
-    )
-    msg = await client.wait_for('message', check=check, timeout=300.0)
-    basis_input = msg.content.strip()
-
-    if ',' in basis_input:
-        data['basis_type'] = 'ttp_chain'
-        data['ttps'] = [ttp.strip() for ttp in basis_input.split(',')]
-    else:
-        entities, _ = graph.fetch_linked_entities(basis_input) or ({}, [])
-        if not entities:
-            await dm_channel.send(f"No data found for {basis_input}. Defaulting to empty TTP list.")
-            data['ttps'] = []
-        else:
-            focal_entity = next(iter(entities.values()))
-            data['basis_type'] = focal_entity['type']
-            data['basis_id'] = basis_input
-            data['ttps'] = [
-                entity['attck_id'] for entity_id, entity in entities.items()
-                if entity['type'] == 'technique' and entity_id != focal_entity.get('attack_id')
-            ]
-
-    return data
-
-async def generate_tabletop_document(data: Dict) -> str:
-    """Generate tabletop document by querying Ollama and return as Markdown."""
-    prompt = (
-        "Generate a tabletop facilitation document in Markdown format for a cybersecurity exercise with the following details:\n"
-        f"- Day and Time: {data['day_time']}\n"
-        f"- Technologies in Use: {', '.join(data['technologies'])}\n"
-        f"- Number of Injects: {data['num_injects']}\n"
-        f"- Attack Basis: {data['basis_type']} ({data.get('basis_id', 'TTP Chain')})\n"
-        f"- TTPs Involved: {', '.join(data['ttps']) if data['ttps'] else 'None'}\n\n"
-        "Include:\n"
-        "1. A short narrative of the event (200-300 words) under a `## Narrative` heading.\n"
-        "2. Each inject with a corresponding sample log file from a relevant system (e.g., Fortinet, Microsoft AD) under `## Injects` with subheadings `### Inject X`.\n"
-        "3. Facilitation tips under a `## Facilitation Tips` heading.\n"
-        "Use Markdown syntax (e.g., `##`, `###`, `-` for lists, ``` for code blocks)."
-    )
-
-    async with aiohttp.ClientSession() as session:
-        payload = {
-            "model": "mistral",
-            "prompt": prompt,
-            "stream": False
-        }
-        try:
-            async with session.post(OLLAMA_URL, json=payload) as response:
-                if response.status == 200:
-                    result = await response.json()
-                    return result.get('response', 'Error: No response from Ollama')
-                else:
-                    return f"Error: Ollama returned status {response.status}"
-        except Exception as e:
-            return f"Error connecting to Ollama: {str(e)}"
-
-# Define slash commands
-@tree.command(name="attack", description="Query MITRE ATT&CK data")
-@app_commands.describe(
-    query_type="Type of query (ttp, group, software, campaign, graph)",
-    method="For TTP: id, search, or detail (optional)",
-    query="The ID or name to search for"
-)
-async def attack(interaction: discord.Interaction, query_type: str, method: str = None, query: str = None):
-    logger.info("Command executed: attack")
-    query_type = query_type.lower()
-    handlers = {
-        'ttp': handle_ttp,
-        'group': handle_group,
-        'software': handle_software,
-        'campaign': handle_campaign,
-        'graph': handle_graph
-    }
-    if query_type not in handlers:
-        await interaction.response.send_message("Invalid query type. Use `ttp`, `group`, `software`, `campaign`, or `graph`.")
-        return
-    if query_type == 'ttp':
-        if not method:
-            await interaction.response.send_message("For TTP, specify a method: `id`, `search`, or `detail`.")
-            return
-        if not query:
-            await interaction.response.send_message("Please provide a query for TTP.")
-            return
-        await handle_ttp(interaction, method, query)
-    else:
-        if not query:
-            await interaction.response.send_message("Please provide a query.")
-            return
-        await handlers[query_type](interaction, query)
-
-@tree.command(name="help", description="Show available commands")
-async def help_command(interaction: discord.Interaction):
-    logger.info("Command executed: help")
-    msg = (
-        "**/attack <query_type> [method] <query>** - Query MITRE ATT&CK data\n"
-        "- `query_type`: `ttp`, `group`, `software`, `campaign`, `graph`\n"
-        "- `method` (for `ttp` only): `id`, `search`, `detail`\n"
-        "- `query`: ID (e.g., T1059) or name\n"
-        "**/help** - Display this message\n"
-        "**/create-tabletop** - Start a DM to create a tabletop exercise document"
-    )
-    await interaction.response.send_message(msg)
-
-@tree.command(name="create-tabletop", description="Start a DM to create a tabletop exercise document")
-async def create_tabletop(interaction: discord.Interaction):
-    logger.info("Command executed: create-tabletop")
-    """Initiate a DM to gather data and generate a tabletop document with Markdown download."""
-    user = interaction.user
-    dm_channel = None
-    try:
-        dm_channel = await user.create_dm()
-        await interaction.response.send_message("I've started a DM with you to gather details for the tabletop exercise!", ephemeral=True)
-        await dm_channel.send("Let's create a tabletop facilitation document. I'll ask you a few questions.")
-
-        # Collect data
-        data = await collect_tabletop_data(user, dm_channel)
-
-        # Generate document
-        await dm_channel.send("Generating your tabletop document, please wait...")
-        document = await generate_tabletop_document(data)
-
-        # Send document as text
-        chunks = split_message(document, max_length=2000)
-        for chunk in chunks:
-            await dm_channel.send(chunk)
-
-        # Send document as Markdown file
-        md_buffer = io.BytesIO(document.encode('utf-8'))
-        md_file = discord.File(md_buffer, filename="tabletop_facilitation_guide.md")
-        await dm_channel.send("Here's your facilitation guide as a downloadable Markdown file:", file=md_file)
-
-        await dm_channel.send("Document generated! Let me know if you need adjustments.")
-    except discord.errors.Forbidden:
-        await interaction.response.send_message("I can't send you a DM. Please enable DMs from server members.", ephemeral=True)
-    except Exception as e:
-        logger.error(f"Create-tabletop command error: {e}")
-        if dm_channel:
-            await dm_channel.send(f"An error occurred: {str(e)}. Please try again or contact support.")
-
-# Discord Events
-@client.event
-async def on_ready():
-    logger.info(f'{client.user} has connected to Discord!')
-    try:
-        # Log all currently registered commands before syncing
-        pre_commands = tree.get_commands()
-        logger.info(f"Pre-sync registered commands: {[cmd.name for cmd in pre_commands]}")
-        
-        try:
-            await tree.sync()
-            commands = tree.get_commands()
-        except Exception as e:
-            logger.error(f"Failed to sync commands: {e}", exc_info=True)
-        logger.info(f"Post-sync registered commands: {[cmd.name for cmd in commands]}")
-    except Exception as e:
-        logger.error(f"Failed to sync commands: {e}")
-
 # Legacy on_message handler
 @client.event
 async def on_message(message):
@@ -293,6 +199,8 @@ async def on_message(message):
         return
     if message.content == "ping":
         await message.channel.send("pong")
+
+logger.info("Script fully loaded: Starting bot")
 
 # Run the bot
 client.run(TOKEN)

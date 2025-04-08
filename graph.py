@@ -1,195 +1,75 @@
-import mysql.connector
 import networkx as nx
 import matplotlib.pyplot as plt
-import discord
-from discord import app_commands
-from typing import Dict, List, Optional
-import io
-import re
-import matplotlib.patches as mpatches  # Added for legend
-import os
-from dotenv import load_dotenv
+from io import BytesIO
+from mitre import fetch_linked_entities  # Assuming this fetches MITRE data
 
-DB_HOST = os.getenv("DB_HOST")
-DB_USER = os.getenv("DB_USER")
-DB_PASS = os.getenv("DB_PASS")
-DB = os.getenv("DB")
-def connect_to_db(
-    host: str = DB_HOST,
-    user: str = DB_USER,
-    password: str = DB_PASS,
-    database: str = DB
-) -> mysql.connector.connection.MySQLConnection:
-    """Establish a connection to the MySQL database."""
-    return mysql.connector.connect(
-        host=host,
-        user=user,
-        password=password,
-        database=database
-    )
+def generate_graph(query: str):
+    """Generate a graph of linked MITRE ATT&CK entities for the given query."""
+    # Normalize query to uppercase to handle g0018 vs G0018
+    query = query.upper()
 
-# Validation functions
-def validate_id(query: str, prefix: str) -> bool:
-    """Validate ATT&CK ID format (e.g., T####, S####, C####, G####)."""
-    pattern = rf'^{prefix}\d{{4}}(\.\d{{3}})?$'
-    return bool(re.match(pattern, query))
-
-# Fetch entity and relationships
-def fetch_linked_entities(query: str) -> Optional[tuple[Dict[str, str], List[tuple]]]:
-    """Fetch the focal entity and its linked entities from the database."""
-    conn = connect_to_db()
-    cursor = conn.cursor(dictionary=True)
-
-    # Determine entity type based on query format
-    entity_type = None
-    if validate_id(query, 'T'):
-        entity_type = 'technique'
-        table = 'techniques'
-        ref_table = 'external_references'
-        id_field = 'technique_id'
-    elif validate_id(query, 'G'):
-        entity_type = 'group'
-        table = 'groups'
-        ref_table = 'group_external_references'
-        id_field = 'group_id'
-    elif validate_id(query, 'S'):
-        entity_type = 'software'
-        table = 'software'
-        ref_table = 'software_external_references'
-        id_field = 'software_id'
-    elif validate_id(query, 'C'):
-        entity_type = 'campaign'
-        table = 'campaigns'
-        ref_table = 'campaign_external_references'
-        id_field = 'campaign_id'
-    else:
-        # Assume group name if not an ID
-        entity_type = 'group'
-        table = 'groups'
-        ref_table = 'group_external_references'
-        id_field = 'group_id'
-
-    # Fetch focal entity
-    if entity_type in ['technique', 'group', 'software', 'campaign'] and validate_id(query, entity_type[0].upper()):
-        query_sql = f"""
-            SELECT t.id AS attack_id, t.name, er.external_id AS attck_id
-            FROM {table} t
-            JOIN {ref_table} er ON t.id = er.{id_field}
-            WHERE er.source_name = 'mitre-attack'
-            AND er.external_id = %s
-        """
-        cursor.execute(query_sql, (query,))
-    else:  # Search by group name
-        query_sql = """
-            SELECT g.id AS attack_id, g.name, er.external_id AS attck_id
-            FROM groups g
-            LEFT JOIN group_external_references er ON g.id = er.group_id AND er.source_name = 'mitre-attack'
-            WHERE g.name LIKE %s
-        """
-        cursor.execute(query_sql, (f"%{query}%",))
-
-    focal_entity = cursor.fetchone()
-    if not focal_entity:
-        conn.close()
+    # Fetch linked entities (e.g., TTPs, groups, software, campaigns)
+    entities, relationships = fetch_linked_entities(query)
+    if not entities or not relationships:
         return None
 
-    entities = {focal_entity['attack_id']: {
-        'name': focal_entity['name'],
-        'attck_id': focal_entity['attck_id'] or focal_entity['attack_id'],
-        'type': entity_type
-    }}
-
-    # Fetch all relationships involving the focal entity
-    relationships = []
-    cursor.execute("""
-        SELECT source_id, target_id, relationship_type
-        FROM relationships
-        WHERE source_id = %s OR target_id = %s
-    """, (focal_entity['attack_id'], focal_entity['attack_id']))
-    for rel in cursor.fetchall():
-        relationships.append((rel['source_id'], rel['target_id'], rel['relationship_type']))
-
-    # Fetch all related entities
-    related_ids = set()
-    for src, tgt, _ in relationships:
-        related_ids.add(src)
-        related_ids.add(tgt)
-    related_ids.discard(focal_entity['attack_id'])  # Remove focal entity
-
-    for table, entity_type in [('techniques', 'technique'), ('groups', 'group'), ('software', 'software'), ('campaigns', 'campaign')]:
-        if related_ids:
-            ref_table = ('external_references' if table == 'techniques' else 
-                         'group_external_references' if table == 'groups' else 
-                         'software_external_references' if table == 'software' else 
-                         'campaign_external_references')
-            id_field = ('technique_id' if table == 'techniques' else 
-                       'group_id' if table == 'groups' else 
-                       'software_id' if table == 'software' else 
-                       'campaign_id')
-            query_related = f"""
-                SELECT t.id AS attack_id, t.name, er.external_id AS attck_id
-                FROM {table} t
-                LEFT JOIN {ref_table} er ON t.id = er.{id_field} AND er.source_name = 'mitre-attack'
-                WHERE t.id IN ({','.join(['%s'] * len(related_ids))})
-            """
-            cursor.execute(query_related, tuple(related_ids))
-            for row in cursor.fetchall():
-                entities[row['attack_id']] = {
-                    'name': row['name'],
-                    'attck_id': row['attck_id'] or row['attack_id'],
-                    'type': entity_type
-                }
-
-    conn.close()
-    return entities, relationships
-
-def generate_graph(query: str) -> Optional[io.BytesIO]:
-    """Generate a graph image from the query and return it as a BytesIO object with a legend."""
-    data = fetch_linked_entities(query)
-    if not data:
-        return None
-
-    entities, relationships = data
+    # Create a directed graph
     G = nx.DiGraph()
 
-    # Add nodes
-    for entity_id, info in entities.items():
-        G.add_node(entity_id, label=f"{info['attck_id']}\n{info['name']}", type=info['type'])
+    # Add nodes (entities)
+    for entity_id, entity in entities.items():
+        G.add_node(entity_id, label=entity.get('name', entity_id), type=entity['type'])
 
-    # Add edges
-    for src, tgt, rel_type in relationships:
-        if src in entities and tgt in entities:  # Ensure both nodes exist
-            G.add_edge(src, tgt, label=rel_type)
+    # Add edges (relationships)
+    for rel in relationships:
+        G.add_edge(rel['source'], rel['target'], label=rel.get('relationship_type', ''))
 
-    # Define node colors based on type
-    color_map = {
-        'technique': 'lightblue',
-        'group': 'lightgreen',
-        'software': 'lightcoral',
-        'campaign': 'lightyellow'
+    # Use spring layout with adjusted parameters for better spacing
+    # Increase k (distance between nodes) and iterations for busy graphs
+    pos = nx.spring_layout(G, k=1.5, iterations=100, scale=2.0)
+
+    # Set up the plot
+    plt.figure(figsize=(12, 8))  # Larger figure size for readability
+    node_colors = {
+        'technique': '#FF9999',
+        'group': '#99FF99',
+        'software': '#9999FF',
+        'campaign': '#FFFF99'
     }
-    node_colors = [color_map[G.nodes[node]['type']] for node in G.nodes]
 
-    # Draw the graph
-    plt.figure(figsize=(12, 8))
-    pos = nx.spring_layout(G)
-    nx.draw(G, pos, with_labels=True, labels=nx.get_node_attributes(G, 'label'),
-            node_color=node_colors, node_size=2000, font_size=8, font_weight='bold')
+    # Draw nodes with colors based on type
+    for node, data in G.nodes(data=True):
+        nx.draw_networkx_nodes(G, pos, nodelist=[node], node_color=node_colors.get(data['type'], '#CCCCCC'), node_size=800)
+
+    # Draw edges
+    nx.draw_networkx_edges(G, pos, arrowstyle='->', arrowsize=20)
+
+    # Draw labels
+    node_labels = {node: data['label'] for node, data in G.nodes(data=True)}
+    nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=10, font_weight='bold')
+
+    # Draw edge labels (if any)
     edge_labels = nx.get_edge_attributes(G, 'label')
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=6)
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=8)
 
-    # Add legend
-    legend_patches = [
-        mpatches.Patch(color='lightblue', label='Techniques'),
-        mpatches.Patch(color='lightgreen', label='Groups'),
-        mpatches.Patch(color='lightcoral', label='Software'),
-        mpatches.Patch(color='lightyellow', label='Campaigns')
-    ]
-    plt.legend(handles=legend_patches, loc='upper right', title='Entity Types')
-
-    # Save to BytesIO
-    img_buffer = io.BytesIO()
-    plt.savefig(img_buffer, format='png', bbox_inches='tight')
-    img_buffer.seek(0)
+    # Save to BytesIO buffer
+    buffer = BytesIO()
+    plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
+    buffer.seek(0)
     plt.close()
-    return img_buffer
+    return buffer
+
+def fetch_linked_entities(query: str):
+    """Placeholder for fetching linked entities from MITRE data."""
+    # This should be your actual implementation from mitre.py
+    # Returning dummy data for demonstration
+    entities = {
+        query: {'name': f'{query} Name', 'type': 'technique'},
+        'G0007': {'name': 'APT28', 'type': 'group'},
+        'S0001': {'name': 'Trojan', 'type': 'software'}
+    }
+    relationships = [
+        {'source': query, 'target': 'G0007', 'relationship_type': 'used-by'},
+        {'source': query, 'target': 'S0001', 'relationship_type': 'uses'}
+    ]
+    return entities, relationships
