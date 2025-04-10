@@ -87,29 +87,91 @@ def process_query(query_type, method=None, query=None):
     elif query_type == 'recommend':
         if not query:
             return "Please provide a query for recommendations."
-        query = query.upper()
-        entities, _ = graph.fetch_linked_entities(query)
-        ttps = [e['attck_id'] for e in entities.values() if e['type'] == 'technique']
-        if not ttps:
-            return f"No techniques found for {query}."
-        recommendations = mitre.recommend_log_sources(ttps)
+        queries = [q.strip().upper() for q in query.split(',')]
+        logger.info(f"Processing queries: {queries}")
+        all_ttps = set()
+        query_ttp_map = {}
+        for q in queries:
+            logger.info(f"Fetching TTPs for query: {q}")
+            entities, _ = graph.fetch_linked_entities(q)
+            if entities:
+                ttps = [e['attck_id'] for e in entities.values() if e['type'] == 'technique']
+                query_ttp_map[q] = set(ttps)
+                all_ttps.update(ttps)
+                logger.info(f"TTPs found for {q}: {ttps}")
+            else:
+                query_ttp_map[q] = set()
+                logger.info(f"No entities found for {q}")
+        
+        if not all_ttps:
+            return f"No techniques found for {', '.join(queries)}."
+        
+        recommendations = mitre.recommend_log_sources(list(all_ttps))
         if "error" in recommendations:
             return recommendations["error"]
-        msg = (f"Log Source Recommendations for {query}\n"
-               f"Queried TTPs: {recommendations['total_ttps']} | Covered: {recommendations['covered_ttps']} "
-               f"({recommendations['coverage_percentage']:.1f}%)\n"
-               "Log Sources:\n")
+        
+        msg = f"Log Source Recommendations for {', '.join(queries)}\n\n"
+        
+        # Individual coverage summary
+        msg += "**Coverage Summary:**\n"
+        for q in queries:
+            ttps = query_ttp_map[q]
+            if ttps:
+                # Corrected coverage calculation
+                covered = sum(1 for ttp in ttps if any(ttp in source["covered_ttps"] for source in recommendations["log_sources"].values()))
+                total = len(ttps)
+                percent = (covered / total * 100) if total > 0 else 0
+                msg += f"- {q}: {covered}/{total} TTPs covered ({percent:.1f}%)\n"
+            else:
+                msg += f"- {q}: No TTPs found (0%)\n"
+        
+        # Total coverage
+        msg += (f"\n**Total Unique TTPs:** Queried: {recommendations['total_ttps']} | Covered: {recommendations['covered_ttps']} "
+                f"({recommendations['total_coverage_percentage']:.1f}%)\n"
+                "Log Sources:\n")
+        
         for source_name, details in recommendations["log_sources"].items():
             ttps_str = ", ".join(details["covered_ttps"][:5])
             if len(details["covered_ttps"]) > 5:
                 ttps_str += f" (+{len(details['covered_ttps']) - 5} more)"
             msg += f"- {source_name} (Quality: {details['quality']}/3, Platforms: {details['platforms']})\n  Covered: {ttps_str}\n"
+        
         if recommendations["blind_spots"]:
             blind_spots = ", ".join(recommendations["blind_spots"][:5])
             if len(recommendations["blind_spots"]) > 5:
                 blind_spots += f" (+{len(recommendations['blind_spots']) - 5} more)"
-            msg += f"Blind Spots: {blind_spots}"
+            msg += f"\nBlind Spots (Uncovered TTPs): {blind_spots}"
+        
         return msg
+    
+    elif query_type == 'group_ttps':
+        if not query:
+            return "Please provide a query for group TTPs."
+        queries = [q.strip().upper() for q in query.split(',')]
+        logger.info(f"Processing group_ttps queries: {queries}")
+        
+        results = mitre.get_group_ttps(queries)
+        if "error" in results:
+            return results["error"]
+        
+        # Part 1: Summary of all deduplicated TTPs
+        all_ttps = results["all_ttps"]
+        msg = "**Summary of All TTPs Used by Queried Groups**\n"
+        msg += f"Total Unique TTPs: {len(all_ttps)}\n"
+        msg += "\n".join(all_ttps) + "\n\n"
+        
+        # Part 2: Individual group details (if multiple groups)
+        if len(queries) > 1:
+            for q in queries:
+                ttps = results["group_ttp_map"].get(q, [])
+                if ttps:
+                    msg += f"**TTPs Used by {q}**\n"
+                    msg += f"Total TTPs: {len(ttps)}\n"
+                    msg += "\n".join(ttps) + "\n\n"
+                else:
+                    msg += f"No TTPs found for group **{q}**.\n\n"
+        
+        return msg.strip()
 
     elif query_type == 'create-tabletop' and ENABLE_TABLETOP:
         if not OLLAMA_URL:
@@ -287,11 +349,23 @@ def send_message():
     if 'tabletop_step' in session and ENABLE_TABLETOP:
         response = handle_tabletop_input(user_input)
     else:
-        parts = user_input.split(maxsplit=2)
+        # Split only on the first space to separate command from query
+        parts = user_input.split(maxsplit=1)
         query_type = parts[0].lower()
-        method = parts[1] if len(parts) > 2 and query_type == 'ttp' else None
-        query = parts[2] if len(parts) > 2 else parts[1] if len(parts) > 1 else None if query_type != 'create-tabletop' else ''
-        response = process_query(query_type, method, query)
+        query = parts[1] if len(parts) > 1 else None
+
+        # For 'ttp', further split to get method and query
+        if query_type == 'ttp' and query:
+            ttp_parts = query.split(maxsplit=1)
+            method = ttp_parts[0].lower() if ttp_parts else None
+            query = ttp_parts[1] if len(ttp_parts) > 1 else None
+            if method not in ['id', 'search', 'detail']:
+                response = "Invalid method for TTP. Use 'id', 'search', or 'detail'."
+            else:
+                response = process_query(query_type, method, query)
+        else:
+            # For other query types (including 'recommend'), pass the full query
+            response = process_query(query_type, None, query)
 
     if isinstance(response, dict) and 'image' in response:
         session['conversation'].append({'sender': 'bot', 'text': response['text'], 'image': response['image']})

@@ -4,6 +4,7 @@ import re
 import os
 from dotenv import load_dotenv
 import logging
+import graph
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -264,7 +265,7 @@ def search_campaigns(query: str) -> Optional[List[Dict[str, any]]]:
         return None
 
 def recommend_log_sources(ttps: List[str]) -> Dict[str, any]:
-    """Recommend log sources for a list of TTPs, with coverage and blind spots."""
+    """Recommend log sources for a list of TTPs, with coverage, blind spots, and individual query analysis."""
     try:
         conn = connect_to_db()
         cursor = conn.cursor(dictionary=True)
@@ -272,6 +273,8 @@ def recommend_log_sources(ttps: List[str]) -> Dict[str, any]:
         # Track log sources and their covered TTPs
         log_sources = {}
         covered_ttps = set()
+        # Track coverage per query item
+        query_coverage = {ttp: {'covered': False, 'sources': set()} for ttp in ttps}
 
         for ttp in ttps:
             cursor.execute("""
@@ -283,6 +286,7 @@ def recommend_log_sources(ttps: List[str]) -> Dict[str, any]:
             
             if sources:
                 covered_ttps.add(ttp)
+                query_coverage[ttp]['covered'] = True
                 for source in sources:
                     source_name = source['name']
                     if source_name not in log_sources:
@@ -292,16 +296,22 @@ def recommend_log_sources(ttps: List[str]) -> Dict[str, any]:
                             "covered_ttps": set()
                         }
                     log_sources[source_name]["covered_ttps"].add(ttp)
+                    query_coverage[ttp]['sources'].add(source_name)
 
         conn.close()
 
         # Calculate blind spots (TTPs with no log sources)
         blind_spots = [ttp for ttp in ttps if ttp not in covered_ttps]
 
-        # Calculate coverage percentage
+        # Calculate total coverage percentage
         total_ttps = len(ttps)
         covered_count = len(covered_ttps)
-        coverage_percentage = (covered_count / total_ttps * 100) if total_ttps > 0 else 0
+        total_coverage_percentage = (covered_count / total_ttps * 100) if total_ttps > 0 else 0
+
+        # Calculate individual coverage percentages
+        individual_coverage = {}
+        for ttp in ttps:
+            individual_coverage[ttp] = 100.0 if query_coverage[ttp]['covered'] else 0.0
 
         # Convert sets to lists for serialization
         for source in log_sources.values():
@@ -310,10 +320,47 @@ def recommend_log_sources(ttps: List[str]) -> Dict[str, any]:
         return {
             "log_sources": log_sources,
             "blind_spots": blind_spots,
-            "coverage_percentage": coverage_percentage,
+            "total_coverage_percentage": total_coverage_percentage,
             "total_ttps": total_ttps,
-            "covered_ttps": covered_count
+            "covered_ttps": covered_count,
+            "individual_coverage": individual_coverage  # New field for per-query coverage
         }
     except mysql.connector.Error as e:
         logger.error(f"Database error in recommend_log_sources: {e}")
         return {"error": f"Error retrieving log source recommendations: {str(e)}"}
+    
+def get_group_ttps(queries: List[str]) -> Dict[str, any]:
+    """Fetch TTPs used by groups, including those linked via software and campaigns."""
+    try:
+        all_ttps = set()
+        group_ttp_map = {}
+
+        for query in queries:
+            entities, relationships = graph.fetch_linked_entities(query)
+            if not entities:
+                group_ttp_map[query] = set()
+                continue
+
+            ttps = set()
+            # Direct TTPs from the group
+            for entity_id, info in entities.items():
+                if info['type'] == 'technique':
+                    ttps.add(info['attck_id'])
+                elif info['type'] in ['software', 'campaign']:
+                    # Fetch TTPs linked to software or campaigns
+                    sub_entities, sub_relationships = graph.fetch_linked_entities(info['attck_id'])
+                    if sub_entities:
+                        for sub_id, sub_info in sub_entities.items():
+                            if sub_info['type'] == 'technique':
+                                ttps.add(sub_info['attck_id'])
+
+            group_ttp_map[query] = ttps
+            all_ttps.update(ttps)
+
+        return {
+            "all_ttps": sorted(list(all_ttps)),
+            "group_ttp_map": {k: sorted(list(v)) for k, v in group_ttp_map.items()}
+        }
+    except Exception as e:
+        logger.error(f"Error fetching group TTPs: {e}")
+        return {"error": f"Error fetching group TTPs: {str(e)}"}

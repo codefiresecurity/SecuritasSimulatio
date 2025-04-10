@@ -107,36 +107,58 @@ async def handle_graph(interaction: discord.Interaction, query: str):
         await interaction.followup.send(f"No linked items found for {query}")
 
 async def recommend_log_sources(interaction: discord.Interaction, query: str):
-    """Recommend log sources in a clean, Discord-friendly format."""
-    query = query.upper()
-    await send_response(interaction, f"Analyzing log source coverage for **{query}**...", is_initial=True)
+    """Recommend log sources in a clean, Discord-friendly format for single or multiple queries."""
+    queries = [q.strip().upper() for q in query.split(',')]
+    logger.info(f"Processing queries: {queries}")
+    await send_response(interaction, f"Analyzing log source coverage for **{', '.join(queries)}**...", is_initial=True)
 
-    # Fetch linked TTPs using existing graph logic
-    entities, _ = graph.fetch_linked_entities(query)
-    ttps = [e['attck_id'] for e in entities.values() if e['type'] == 'technique']
+    all_ttps = set()
+    query_ttp_map = {}
+    for q in queries:
+        logger.info(f"Fetching TTPs for query: {q}")
+        entities, _ = graph.fetch_linked_entities(q)
+        if entities:
+            ttps = [e['attck_id'] for e in entities.values() if e['type'] == 'technique']
+            query_ttp_map[q] = set(ttps)
+            all_ttps.update(ttps)
+            logger.info(f"TTPs found for {q}: {ttps}")
+        else:
+            query_ttp_map[q] = set()
+            logger.info(f"No entities found for {q}")
 
-    if not ttps:
-        await interaction.followup.send(f"No techniques found for **{query}**.")
+    if not all_ttps:
+        await interaction.followup.send(f"No techniques found for **{', '.join(queries)}**.")
         return
 
-    # Get recommendations from mitre.py
-    recommendations = mitre.recommend_log_sources(ttps)
-
+    recommendations = mitre.recommend_log_sources(list(all_ttps))
     if "error" in recommendations:
         await interaction.followup.send(recommendations["error"])
         return
 
-    # Build the formatted output
-    msg_lines = [f"**Log Source Recommendations for {query}**"]
-    msg_lines.append(f"Queried TTPs: {recommendations['total_ttps']} | Covered: {recommendations['covered_ttps']} ({recommendations['coverage_percentage']:.1f}%)")
-    msg_lines.append(f"**This is an estimated coverage based on available data sources. Validate with your own data!**")
+    msg_lines = [f"**Log Source Recommendations for {', '.join(queries)}**"]
+    
+    # Individual coverage summary
+    msg_lines.append("**Coverage Summary:**")
+    for q in queries:
+        ttps = query_ttp_map[q]
+        if ttps:
+            # Corrected coverage calculation
+            covered = sum(1 for ttp in ttps if any(ttp in source["covered_ttps"] for source in recommendations["log_sources"].values()))
+            total = len(ttps)
+            percent = (covered / total * 100) if total > 0 else 0
+            msg_lines.append(f"- {q}: {covered}/{total} TTPs covered ({percent:.1f}%)")
+        else:
+            msg_lines.append(f"- {q}: No TTPs found (0%)")
+
+    # Total coverage
+    msg_lines.append(f"**Total Unique TTPs:** Queried: {recommendations['total_ttps']} | Covered: {recommendations['covered_ttps']} ({recommendations['total_coverage_percentage']:.1f}%)")
+    msg_lines.append("**This is an estimated coverage based on available data sources. Validate with your own data!**")
     msg_lines.append("```")
 
-    # Log Sources Section
     if recommendations["log_sources"]:
         msg_lines.append("🔍 Log Sources:")
         for source_name, details in recommendations["log_sources"].items():
-            ttps_str = ", ".join(details["covered_ttps"][:5])  # Limit to 5 TTPs for brevity
+            ttps_str = ", ".join(details["covered_ttps"][:5])
             if len(details["covered_ttps"]) > 5:
                 ttps_str += f" (+{len(details['covered_ttps']) - 5} more)"
             msg_lines.append(
@@ -144,18 +166,47 @@ async def recommend_log_sources(interaction: discord.Interaction, query: str):
                 f"  Covered: {ttps_str}"
             )
 
-    # Blind Spots Section
     if recommendations["blind_spots"]:
-        blind_spots_str = ", ".join(recommendations["blind_spots"][:5])  # Limit to 5 for brevity
+        blind_spots_str = ", ".join(recommendations["blind_spots"][:5])
         if len(recommendations["blind_spots"]) > 5:
             blind_spots_str += f" (+{len(recommendations['blind_spots']) - 5} more)"
-        msg_lines.append("⚠️ Blind Spots:")
+        msg_lines.append("⚠️ Blind Spots (Uncovered TTPs):")
         msg_lines.append(f"• {blind_spots_str}")
 
     msg_lines.append("```")
     msg = "\n".join(msg_lines)
     
     await send_response(interaction, msg)
+
+async def handle_group_ttps(interaction: discord.Interaction, query: str):
+    """List TTPs used by groups, including linked software and campaigns."""
+    queries = [q.strip().upper() for q in query.split(',')]
+    logger.info(f"Processing group_ttps queries: {queries}")
+    await send_response(interaction, f"Fetching TTPs for groups **{', '.join(queries)}**...", is_initial=True)
+
+    results = mitre.get_group_ttps(queries)
+    if "error" in results:
+        await interaction.followup.send(results["error"])
+        return
+
+    # Part 1: Summary of all deduplicated TTPs
+    all_ttps = results["all_ttps"]
+    summary_msg = "**Summary of All TTPs Used by Queried Groups**\n"
+    summary_msg += f"Total Unique TTPs: {len(all_ttps)}\n"
+    summary_msg += "```\n" + "\n".join(all_ttps) + "\n```"
+    await interaction.followup.send(summary_msg)
+
+    # Part 2: Individual group replies (if multiple groups)
+    if len(queries) > 1:
+        for query in queries:
+            ttps = results["group_ttp_map"].get(query, [])
+            if ttps:
+                group_msg = f"**TTPs Used by {query}**\n"
+                group_msg += f"Total TTPs: {len(ttps)}\n"
+                group_msg += "```\n" + "\n".join(ttps) + "\n```"
+                await interaction.followup.send(group_msg)
+            else:
+                await interaction.followup.send(f"No TTPs found for group **{query}**.")
 
 # Tabletop Command Logic (simplified for testing)
 async def collect_tabletop_data(user: discord.User, dm_channel: discord.DMChannel) -> Dict:
@@ -226,6 +277,12 @@ async def attack(interaction: discord.Interaction, query_type: str, method: str 
             await send_response(interaction, "Please provide a query.", is_initial=True)
             return
         await handlers[query_type](interaction, query)
+
+@tree.command(name="group_ttps", description="List TTPs used by groups")
+@app_commands.describe(query="Group IDs or names (e.g., G0007 or APT28), comma-separated")
+async def group_ttps(interaction: discord.Interaction, query: str):
+    logger.info(f"Command invoked: group_ttps with query={query}")
+    await handle_group_ttps(interaction, query)
 
 @tree.command(name="help", description="Show available commands")
 async def help_command(interaction: discord.Interaction):

@@ -110,3 +110,95 @@ footer a {
 footer a:hover {
     text-decoration: underline;
 }
+/* Existing styles (assumed) */
+.container {
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.conversation {
+    border: 1px solid #ccc;
+    padding: 10px;
+    height: 400px;
+    overflow-y: auto;
+}
+
+.message {
+    margin: 10px 0;
+}
+
+.user {
+    text-align: right;
+}
+
+.bot {
+    text-align: left;
+}
+
+form {
+    margin-top: 20px;
+}
+
+input[type="text"] {
+    width: 70%;
+    padding: 5px;
+}
+
+button {
+    padding: 5px 10px;
+}
+
+/* New styles for help section */
+.help-section {
+    margin-top: 40px;
+    padding: 20px;
+    background-color: #f9f9f9;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.help-section h2 {
+    color: #333;
+    font-size: 1.5em;
+    margin-bottom: 10px;
+}
+
+.help-section p {
+    color: #666;
+    line-height: 1.5;
+}
+
+.command-list {
+    list-style: none;
+    padding: 0;
+}
+
+.command-list li {
+    margin: 15px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.command {
+    font-weight: bold;
+    color: #007bff;
+    font-family: monospace;
+}
+
+.description {
+    color: #444;
+}
+
+.description code {
+    background-color: #e9ecef;
+    padding: 2px 5px;
+    border-radius: 3px;
+}
+
+.note {
+    font-style: italic;
+    color: #888;
+    margin-top: 15px;
+}

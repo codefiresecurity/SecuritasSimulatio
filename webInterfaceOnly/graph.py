@@ -9,6 +9,12 @@ import re
 import matplotlib.patches as mpatches  # Added for legend
 import os
 from dotenv import load_dotenv
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 DB_HOST = os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")
@@ -36,6 +42,7 @@ def validate_id(query: str, prefix: str) -> bool:
 
 # Fetch entity and relationships
 def fetch_linked_entities(query: str) -> Optional[tuple[Dict[str, str], List[tuple]]]:
+    logger.info(f"Fetching entities for query: {query}")
     """Fetch the focal entity and its linked entities from the database."""
     conn = connect_to_db()
     cursor = conn.cursor(dictionary=True)
@@ -141,6 +148,9 @@ def fetch_linked_entities(query: str) -> Optional[tuple[Dict[str, str], List[tup
                 }
 
     conn.close()
+    if entities:
+        logger.info(f"Found entities for {query}: {entities}")
+
     return entities, relationships
 
 def generate_graph(query: str) -> Optional[io.BytesIO]:
