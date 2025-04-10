@@ -349,22 +349,27 @@ def send_message():
     if 'tabletop_step' in session and ENABLE_TABLETOP:
         response = handle_tabletop_input(user_input)
     else:
-        # Split only on the first space to separate command from query
         parts = user_input.split(maxsplit=1)
         query_type = parts[0].lower()
         query = parts[1] if len(parts) > 1 else None
 
-        # For 'ttp', further split to get method and query
-        if query_type == 'ttp' and query:
-            ttp_parts = query.split(maxsplit=1)
-            method = ttp_parts[0].lower() if ttp_parts else None
+        if query_type == 'ttp':
+            ttp_parts = query.split(maxsplit=1) if query else [None, None]
+            method = ttp_parts[0].lower() if ttp_parts[0] else None
             query = ttp_parts[1] if len(ttp_parts) > 1 else None
             if method not in ['id', 'search', 'detail']:
                 response = "Invalid method for TTP. Use 'id', 'search', or 'detail'."
             else:
                 response = process_query(query_type, method, query)
+        elif query_type == 'create':
+            create_parts = query.split(maxsplit=1) if query else [None, None]
+            method = create_parts[0].lower() if create_parts[0] else None
+            query = create_parts[1] if len(create_parts) > 1 else None
+            if method != 'tabletop':
+                response = "Invalid create command. Use 'create tabletop'."
+            else:
+                response = process_query(query_type, method, query)
         else:
-            # For other query types (including 'recommend'), pass the full query
             response = process_query(query_type, None, query)
 
     if isinstance(response, dict) and 'image' in response:
