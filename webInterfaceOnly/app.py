@@ -419,8 +419,11 @@ async def generate_tabletop_document(data):
 
         Ensure each JSON log is unique, realistic, and relevant to the inject’s scenario.
         """
-        response = await ollama.generate(model="llama3", prompt=prompt)
-        markdown = response['response']
+        response = await query_ollama(prompt)
+        if response.startswith("Error") or response.startswith("Failed"):
+            logger.error(f"Ollama query failed: {response}")
+            return f"Error generating document: {response}"
+        markdown = response
 
         # Validate JSON logs in output
         import re
