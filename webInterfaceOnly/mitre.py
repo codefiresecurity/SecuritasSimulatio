@@ -364,7 +364,7 @@ def get_group_ttps(queries: List[str]) -> Dict[str, any]:
         logger.error(f"Error fetching group TTPs: {e}")
         return {"error": f"Error fetching group TTPs: {str(e)}"}
     
-def fetch_mitre_details(identifier: str) -> Dict[str, any]:def fetch_mitre_details(identifier: str) -> Dict[str, any]:
+def fetch_mitre_details(identifier: str) -> Dict[str, any]:
     """Fetch details for a MITRE ATT&CK group, software, campaign, or generic term."""
     try:
         conn = connect_to_db()
