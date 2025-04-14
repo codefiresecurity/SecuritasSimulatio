@@ -147,6 +147,7 @@
                 const img = document.createElement('img');
                 img.src = `data:image/png;base64,${data.response.image}`;
                 img.className = 'graph-image';
+                botDiv.innerHTML = '<p><strong>Bot:</strong></p>';
                 botDiv.appendChild(img);
                 console.log("Right place");
             }
