@@ -176,12 +176,19 @@ def process_query(query_type, method=None, query=None):
     elif query_type == 'create-tabletop' and ENABLE_TABLETOP:
         if not OLLAMA_URL:
             return "Tabletop creation requires Ollama, but OLLAMA_URL is not configured."
-        if 'tabletop_step' not in session:
-            session['tabletop_step'] = 1
-            session['tabletop_data'] = {}
-            session.modified = True
-            return "Starting tabletop exercise creation.\nPlease specify the day of the week and time of day (e.g., 'Monday morning'):"
-        return "Please continue the tabletop process in the next message."
+        session['tabletop_step'] = 'day_time'
+        session['tabletop_data'] = {
+            'day_time': None,
+            'basis_type': None,
+            'basis_id': None,
+            'technologies': [],
+            'num_injects': None,
+            'ttps': []
+        }
+        session.modified = True
+        html = '<h2>Tabletop Exercise Creation</h2>'
+        html += '<p>Please specify the day of the week and time of day (e.g., "Monday morning"):</p>'
+        return html
 
     else:
         return f"Invalid query type or command disabled. Available types: ttp, group, software, campaign, graph, recommend{' create-tabletop' if ENABLE_TABLETOP else ''}."
@@ -266,64 +273,97 @@ def fetch_mitre_details(scenario_type):
 
 def handle_tabletop_input(user_input):
     """Handle multi-step tabletop creation input."""
-    step = session.get('tabletop_step', 1)
+    step = session.get('tabletop_step', 'day_time')
     data = session.get('tabletop_data', {})
+    user_input = user_input.strip()
 
-    if step == 1:
+    if step == 'day_time':
+        if not user_input:
+            return '<p>Please provide a valid day and time (e.g., "Monday morning").</p>'
         data['day_time'] = user_input
-        session['tabletop_step'] = 2
+        session['tabletop_step'] = 'basis'
         session['tabletop_data'] = data
         session.modified = True
-        return "Please specify the scenario type (e.g., 'ransomware', 'T1059', 'G0007', 'S0002', 'C0001'):"
-    
-    elif step == 2:
-        data['scenario_type'] = user_input
+        html = f'<h2>Day and Time Set: {user_input}</h2>'
+        html += '<p>Please specify the attack basis: a Group ID (e.g., G0027), Software ID (e.g., S0002), or a general term like "ransomware":</p>'
+        return html
+
+    elif step == 'basis':
+        if not user_input:
+            return '<p>Please provide a valid attack basis.</p>'
         mitre_data = fetch_mitre_details(user_input)
-        data['mitre_data'] = mitre_data
-        session.pop('tabletop_step', None)
-        session['tabletop_data'] = data  # Keep data for download
+        data['basis_type'] = mitre_data['type']
+        if mitre_data['type'] != 'generic':
+            data['basis_id'] = mitre_data['details'].get('group_id') or mitre_data['details'].get('software_id') or mitre_data['details'].get('campaign_id') or user_input
+            # Fetch TTPs for group or software
+            entities, _ = graph.fetch_linked_entities(user_input.upper())
+            if entities:
+                data['ttps'] = [e['attck_id'] for e in entities.values() if e['type'] == 'technique']
+        else:
+            data['basis_id'] = user_input
+            data['ttps'] = []
+        session['tabletop_step'] = 'technologies'
+        session['tabletop_data'] = data
         session.modified = True
+        html = f'<h2>Attack Basis Set: {user_input}</h2>'
+        html += '<p>Please specify the types of technology in the environment (comma-separated, e.g., "Fortinet, Microsoft AD, AWS"):</p>'
+        return html
+
+    elif step == 'technologies':
+        if not user_input:
+            return '<p>Please provide a valid list of technologies.</p>'
+        technologies = [t.strip() for t in user_input.split(',') if t.strip()]
+        if not technologies:
+            return '<p>Please provide at least one technology.</p>'
+        data['technologies'] = technologies
+        session['tabletop_step'] = 'num_injects'
+        session['tabletop_data'] = data
+        session.modified = True
+        html = '<h2>Technologies Set</h2>'
+        html += '<table class="tech-table"><thead><tr><th>Technology</th></tr></thead><tbody>'
+        for tech in technologies:
+            html += f'<tr><td>{tech}</td></tr>'
+        html += '</tbody></table>'
+        html += '<p>Please specify the number of injects needed (e.g., 3):</p>'
+        return html
+
+    elif step == 'num_injects':
+        try:
+            num_injects = int(user_input)
+            if num_injects <= 0:
+                raise ValueError
+        except ValueError:
+            return '<p>Please provide a valid positive number of injects.</p>'
+        data['num_injects'] = num_injects
+        session['tabletop_data'] = data
+        session.pop('tabletop_step', None)  # End the process
+        session.modified = True
+
+        # Generate the document
         result = asyncio.run(generate_tabletop_document(data))
-        session['conversation'].append({'sender': 'bot', 'text': result + "\n\n[Download Markdown](#download)"})
-        return result
+        session['conversation'].append({'sender': 'bot', 'text': result + '<p><a href="/download">Download Markdown</a></p>'})
+        html = '<h2>Tabletop Document Generated</h2>'
+        html += '<pre>' + result + '</pre>'
+        html += '<p><a href="/download">Download Markdown</a></p>'
+        return html
+
+    return '<p>Invalid tabletop state. Start a new exercise with <code>create tabletop</code>.</p>'
 
 async def generate_tabletop_document(data):
-    """Generate a tabletop document using Ollama with MITRE ATT&CK data."""
-    mitre_data = data.get('mitre_data', {})
-    scenario_details = ""
-
-    if mitre_data['type'] == 'technique':
-        d = mitre_data['details']
-        scenario_details = (
-            f"This scenario involves the MITRE ATT&CK technique {d['ttp_id']} ({d['name']}).\n"
-            f"Description: {d['description']}"
-        )
-    elif mitre_data['type'] == 'group':
-        d = mitre_data['details']
-        scenario_details = (
-            f"This scenario involves the MITRE ATT&CK group {d['group_id']} ({d['name']}).\n"
-            f"Description: {d['description']}"
-        )
-    elif mitre_data['type'] == 'software':
-        d = mitre_data['details']
-        scenario_details = (
-            f"This scenario involves the MITRE ATT&CK software {d['software_id']} ({d['name']}).\n"
-            f"Description: {d['description']}"
-        )
-    elif mitre_data['type'] == 'campaign':
-        d = mitre_data['details']
-        scenario_details = (
-            f"This scenario involves the MITRE ATT&CK campaign {d['campaign_id']} ({d['name']}).\n"
-            f"Description: {d['description']}"
-        )
-    else:
-        scenario_details = f"This scenario involves a generic {data['scenario_type']} event."
-
+    """Generate a tabletop document using Ollama with the specified prompt."""
+    basis_id = data.get('basis_id', 'TTP Chain')
     prompt = (
-        f"Generate a tabletop exercise document in Markdown format for a cybersecurity scenario. "
-        f"The exercise is scheduled for {data['day_time']} and involves the following scenario:\n"
-        f"{scenario_details}\n"
-        f"Include sections for an introduction, objectives, scenario description, and discussion questions."
+        "Generate a tabletop facilitation document in Markdown format for a cybersecurity exercise with the following details:\n"
+        f"- Day and Time: {data['day_time']}\n"
+        f"- Technologies in Use: {', '.join(data['technologies'])}\n"
+        f"- Number of Injects: {data['num_injects']}\n"
+        f"- Attack Basis: {data['basis_type']} ({basis_id})\n"
+        f"- TTPs Involved: {', '.join(data['ttps']) if data['ttps'] else 'None'}\n\n"
+        "Include:\n"
+        "1. A short narrative of the event (200-300 words) under a `## Narrative` heading.\n"
+        "2. Each inject with a corresponding sample log file from a relevant system (e.g., Fortinet, Microsoft AD) under `## Injects` with subheadings `### Inject X`.\n"
+        "3. Facilitation tips under a `## Facilitation Tips` heading.\n"
+        "Use Markdown syntax (e.g., `##`, `###`, `-` for lists, ``` for code blocks)."
     )
     response = await query_ollama(prompt)
     return response
