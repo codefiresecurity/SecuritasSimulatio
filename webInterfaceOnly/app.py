@@ -300,11 +300,11 @@ def handle_tabletop_input(user_input):
         data['basis_type'] = mitre_data['type']
         if mitre_data['type'] != 'generic':
             data['basis_id'] = (mitre_data['details'].get('group_id') or 
-                              mitre_data['details'].get('software_id') or 
-                              mitre_data['details'].get('campaign_id') or 
-                              mitre_data['details'].get('attack_id') or 
-                              user_input)
-            attack_id = mitre_data['details'].get('attack_id')
+                                mitre_data['details'].get('software_id') or 
+                                mitre_data['details'].get('campaign_id') or 
+                                user_input)  # Use G0027
+            attack_id = data['basis_id']
+            data['ttps'] = []
             if attack_id:
                 entities, _ = graph.fetch_linked_entities(attack_id)
                 if entities:
