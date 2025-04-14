@@ -148,6 +148,7 @@
                 img.src = `data:image/png;base64,${data.response.image}`;
                 img.className = 'graph-image';
                 botDiv.innerHTML = '<p><strong>Bot:</strong></p>';
+                botDiv.appendChild(botDiv);
                 botDiv.appendChild(img);
                 conversation.appendChild(botDiv);
                 conversation.scrollTop = conversation.scrollHeight;
