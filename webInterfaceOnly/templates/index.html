@@ -142,7 +142,7 @@
             console.log(data.image);
             console.log(data.response);
             // Handle images
-            if (data.image) {
+            if (data.response.image) {
                 console.log('top of image');
                 const img = document.createElement('img');
                 img.src = `data:image/png;base64,${data.image}`;
