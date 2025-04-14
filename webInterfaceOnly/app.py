@@ -307,6 +307,135 @@ def fetch_mitre_details(scenario_type):
 
     return {'type': 'generic', 'details': scenario_type}
 
+async def generate_tabletop_document(data):
+    """Generate a tabletop exercise document with inline JSON log entries and a JSON version."""
+    try:
+        base_time = datetime.datetime.now().replace(
+            hour=9, minute=0, second=0, microsecond=0
+        ).isoformat() + "Z"
+
+        ttps_str = ', '.join(data['ttps']) if data['ttps'] else 'None'
+        prompt = f"""
+        Generate a tabletop exercise document in Markdown format based on the following details:
+        - **Day and Time**: {data['day_time']}
+        - **Basis**: {data['basis_id']} ({data['basis_type']})
+        - **Technologies**: {', '.join(data['technologies'])}
+        - **Number of Injects**: {data['num_injects']}
+        - **TTPs**: {ttps_str}
+
+        The document must include:
+        1. A **Narrative** section describing the scenario context (e.g., based on the basis and technologies).
+        2. Exactly **{data['num_injects']} Injects**, each with:
+           - A unique title (e.g., "Inject 1: Initial Compromise").
+           - A description of the event, aligned with the TTPs (if provided) or basis/technologies.
+           - An objective for the participants (e.g., "Identify the suspicious activity").
+           - A **Log Evidence** section containing one unique JSON-formatted log entry, enclosed in ```json ``` code blocks.
+             - The log should reflect the inject’s event (e.g., for T1059, include a command execution log).
+             - Include fields like `timestamp` (start from {base_time}, increment by 5 minutes per inject), `event`, and context-specific fields (e.g., `source_ip`, `command`, `port`).
+             - Tailor logs to technologies (e.g., AWS CloudTrail format for AWS, syslog for Cisco).
+             - Do NOT reference external files like 'logfile_sample.txt'.
+        3. A **Facilitation Tips** section with guidance for running the exercise.
+
+        Ensure each JSON log is unique, realistic, and relevant to the inject’s scenario.
+        """
+        response = await query_ollama(prompt)
+        if response.startswith("Error") or response.startswith("Failed"):
+            logger.error(f"Ollama query failed: {response}")
+            return f"Error generating document: {response}"
+
+        markdown = response
+
+        # Extract JSON blocks and structure JSON output
+        json_blocks = re.findall(r'```json\n(.*?)\n```', markdown, re.DOTALL)
+        json_data = {
+            "day_time": data['day_time'],
+            "basis": {
+                "id": data['basis_id'],
+                "type": data['basis_type']
+            },
+            "technologies": data['technologies'],
+            "num_injects": data['num_injects'],
+            "ttps": data['ttps'],
+            "narrative": "",
+            "injects": [],
+            "facilitation_tips": ""
+        }
+
+        # Parse Markdown to populate JSON
+        lines = markdown.split('\n')
+        current_section = None
+        current_inject = None
+        inject_count = 0
+
+        for line in lines:
+            line = line.strip()
+            if line.startswith('# Narrative'):
+                current_section = 'narrative'
+                json_data['narrative'] = []
+            elif line.startswith('# Inject'):
+                current_section = 'injects'
+                inject_count += 1
+                current_inject = {
+                    "title": line,
+                    "description": [],
+                    "objective": [],
+                    "log_entry": json_blocks[inject_count-1] if inject_count-1 < len(json_blocks) else "{}"
+                }
+                json_data['injects'].append(current_inject)
+            elif line.startswith('# Facilitation Tips'):
+                current_section = 'facilitation_tips'
+                json_data['facilitation_tips'] = []
+            elif line and current_section:
+                if current_section == 'narrative':
+                    json_data['narrative'].append(line)
+                elif current_section == 'facilitation_tips':
+                    json_data['facilitation_tips'].append(line)
+                elif current_section == 'injects' and current_inject:
+                    if line.startswith('**Objective**:'):
+                        current_inject['objective'].append(line.replace('**Objective**: ', ''))
+                    elif not line.startswith('```'):
+                        current_inject['description'].append(line)
+
+        # Convert lists to strings for cleaner JSON
+        json_data['narrative'] = '\n'.join(json_data['narrative'])
+        json_data['facilitation_tips'] = '\n'.join(json_data['facilitation_tips'])
+        for inject in json_data['injects']:
+            inject['description'] = '\n'.join(inject['description'])
+            inject['objective'] = '\n'.join(inject['objective'])
+            try:
+                inject['log_entry'] = json.loads(inject['log_entry'])
+            except json.JSONDecodeError:
+                inject['log_entry'] = {
+                    "timestamp": (datetime.datetime.fromisoformat(base_time[:-1]) + 
+                                 datetime.timedelta(minutes=5*(json_data['injects'].index(inject)+1))).isoformat() + "Z",
+                    "event": f"Activity for {inject['title']}",
+                    "source": "unknown",
+                    "details": "Generated due to invalid JSON"
+                }
+
+        # Validate JSON blocks
+        for i, block in enumerate(json_blocks, 1):
+            try:
+                json.loads(block)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Invalid JSON in inject {i}: {e}")
+                log_entry = {
+                    "timestamp": (datetime.datetime.fromisoformat(base_time[:-1]) + 
+                                 datetime.timedelta(minutes=5*i)).isoformat() + "Z",
+                    "event": f"Activity for inject {i}",
+                    "source": "unknown",
+                    "details": "Generated due to invalid JSON"
+                }
+                markdown = markdown.replace(
+                    f'```json\n{block}\n```',
+                    f'```json\n{json.dumps(log_entry, indent=2)}\n```'
+                )
+
+        return {"markdown": markdown, "json": json_data}
+    except Exception as e:
+        logger.error(f"Error generating document: {e}")
+        return f"Error generating document: {e}"
+
 def handle_tabletop_input(user_input):
     """Handle multi-step tabletop creation input."""
     step = session.get('tabletop_step', 'day_time')
@@ -416,136 +545,7 @@ def handle_tabletop_input(user_input):
         session.modified = True
         return html
 
-        return '<p>Invalid tabletop state. Start a new exercise with <code>create tabletop</code>.</p>'
-
-    async def generate_tabletop_document(data):
-        """Generate a tabletop exercise document with inline JSON log entries and a JSON version."""
-        try:
-            base_time = datetime.datetime.now().replace(
-                hour=9, minute=0, second=0, microsecond=0
-            ).isoformat() + "Z"
-
-            ttps_str = ', '.join(data['ttps']) if data['ttps'] else 'None'
-            prompt = f"""
-            Generate a tabletop exercise document in Markdown format based on the following details:
-            - **Day and Time**: {data['day_time']}
-            - **Basis**: {data['basis_id']} ({data['basis_type']})
-            - **Technologies**: {', '.join(data['technologies'])}
-            - **Number of Injects**: {data['num_injects']}
-            - **TTPs**: {ttps_str}
-
-            The document must include:
-            1. A **Narrative** section describing the scenario context (e.g., based on the basis and technologies).
-            2. Exactly **{data['num_injects']} Injects**, each with:
-            - A unique title (e.g., "Inject 1: Initial Compromise").
-            - A description of the event, aligned with the TTPs (if provided) or basis/technologies.
-            - An objective for the participants (e.g., "Identify the suspicious activity").
-            - A **Log Evidence** section containing one unique JSON-formatted log entry, enclosed in ```json ``` code blocks.
-                - The log should reflect the inject’s event (e.g., for T1059, include a command execution log).
-                - Include fields like `timestamp` (start from {base_time}, increment by 5 minutes per inject), `event`, and context-specific fields (e.g., `source_ip`, `command`, `port`).
-                - Tailor logs to technologies (e.g., AWS CloudTrail format for AWS, syslog for Cisco).
-                - Do NOT reference external files like 'logfile_sample.txt'.
-            3. A **Facilitation Tips** section with guidance for running the exercise.
-
-            Ensure each JSON log is unique, realistic, and relevant to the inject’s scenario.
-            """
-            response = await query_ollama(prompt)
-            if response.startswith("Error") or response.startswith("Failed"):
-                logger.error(f"Ollama query failed: {response}")
-                return f"Error generating document: {response}"
-
-            markdown = response
-
-            # Extract JSON blocks and structure JSON output
-            json_blocks = re.findall(r'```json\n(.*?)\n```', markdown, re.DOTALL)
-            json_data = {
-                "day_time": data['day_time'],
-                "basis": {
-                    "id": data['basis_id'],
-                    "type": data['basis_type']
-                },
-                "technologies": data['technologies'],
-                "num_injects": data['num_injects'],
-                "ttps": data['ttps'],
-                "narrative": "",
-                "injects": [],
-                "facilitation_tips": ""
-            }
-
-            # Parse Markdown to populate JSON
-            lines = markdown.split('\n')
-            current_section = None
-            current_inject = None
-            inject_count = 0
-
-            for line in lines:
-                line = line.strip()
-                if line.startswith('# Narrative'):
-                    current_section = 'narrative'
-                    json_data['narrative'] = []
-                elif line.startswith('# Inject'):
-                    current_section = 'injects'
-                    inject_count += 1
-                    current_inject = {
-                        "title": line,
-                        "description": [],
-                        "objective": [],
-                        "log_entry": json_blocks[inject_count-1] if inject_count-1 < len(json_blocks) else "{}"
-                    }
-                    json_data['injects'].append(current_inject)
-                elif line.startswith('# Facilitation Tips'):
-                    current_section = 'facilitation_tips'
-                    json_data['facilitation_tips'] = []
-                elif line and current_section:
-                    if current_section == 'narrative':
-                        json_data['narrative'].append(line)
-                    elif current_section == 'facilitation_tips':
-                        json_data['facilitation_tips'].append(line)
-                    elif current_section == 'injects' and current_inject:
-                        if line.startswith('**Objective**:'):
-                            current_inject['objective'].append(line.replace('**Objective**: ', ''))
-                        elif not line.startswith('```'):
-                            current_inject['description'].append(line)
-
-            # Convert lists to strings for cleaner JSON
-            json_data['narrative'] = '\n'.join(json_data['narrative'])
-            json_data['facilitation_tips'] = '\n'.join(json_data['facilitation_tips'])
-            for inject in json_data['injects']:
-                inject['description'] = '\n'.join(inject['description'])
-                inject['objective'] = '\n'.join(inject['objective'])
-                try:
-                    inject['log_entry'] = json.loads(inject['log_entry'])
-                except json.JSONDecodeError:
-                    inject['log_entry'] = {
-                        "timestamp": (datetime.datetime.fromisoformat(base_time[:-1]) + 
-                                    datetime.timedelta(minutes=5*(json_data['injects'].index(inject)+1))).isoformat() + "Z",
-                        "event": f"Activity for {inject['title']}",
-                        "source": "unknown",
-                        "details": "Generated due to invalid JSON"
-                    }
-
-            # Validate JSON blocks
-            for i, block in enumerate(json_blocks, 1):
-                try:
-                    json.loads(block)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Invalid JSON in inject {i}: {e}")
-                    log_entry = {
-                        "timestamp": (datetime.datetime.fromisoformat(base_time[:-1]) + 
-                                    datetime.timedelta(minutes=5*i)).isoformat() + "Z",
-                        "event": f"Activity for inject {i}",
-                        "source": "unknown",
-                        "details": "Generated due to invalid JSON"
-                    }
-                    markdown = markdown.replace(
-                        f'```json\n{block}\n```',
-                        f'```json\n{json.dumps(log_entry, indent=2)}\n```'
-                    )
-
-            return {"markdown": markdown, "json": json_data}
-        except Exception as e:
-            logger.error(f"Error generating document: {e}")
-            return f"Error generating document: {e}"
+    return '<p>Invalid tabletop state. Start a new exercise with <code>create tabletop</code>.</p>'
 
 @app.route('/download')
 @login_required
