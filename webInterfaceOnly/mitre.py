@@ -163,7 +163,7 @@ def search_groups(query: str) -> Optional[List[Dict[str, any]]]:
 
         groups = cursor.fetchall()
         if not groups:
-            logger.info(f"No groups found for query: {query}")
+            logger.info(f"No groups found for query: {query}\n {query_sql}")
             conn.close()
             return []
 
