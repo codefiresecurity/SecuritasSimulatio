@@ -288,20 +288,27 @@ def handle_tabletop_input(user_input):
         session['tabletop_data'] = data
         session.modified = True
         html = f'<h2>Day and Time Set: {user_input}</h2>'
-        html += '<p>Please specify the attack basis: a Group ID (e.g., G0027), Software ID (e.g., S0002), or a general term like "ransomware":</p>'
+        html += '<p>Please specify the attack basis: a Group ID (e.g., G0027), Software ID (e.g., S0002), Campaign ID (e.g., C0027), or a general term like "ransomware":</p>'
         return html
 
     elif step == 'basis':
         if not user_input:
             return '<p>Please provide a valid attack basis.</p>'
         mitre_data = fetch_mitre_details(user_input)
+        if mitre_data['type'] == 'error':
+            return f'<p>Error fetching MITRE details: {mitre_data["details"]}</p>'
         data['basis_type'] = mitre_data['type']
         if mitre_data['type'] != 'generic':
-            data['basis_id'] = mitre_data['details'].get('group_id') or mitre_data['details'].get('software_id') or mitre_data['details'].get('campaign_id') or user_input
-            # Fetch TTPs for group or software
-            entities, _ = graph.fetch_linked_entities(user_input.upper())
-            if entities:
-                data['ttps'] = [e['attck_id'] for e in entities.values() if e['type'] == 'technique']
+            data['basis_id'] = (mitre_data['details'].get('group_id') or 
+                              mitre_data['details'].get('software_id') or 
+                              mitre_data['details'].get('campaign_id') or 
+                              mitre_data['details'].get('attack_id') or 
+                              user_input)
+            attack_id = mitre_data['details'].get('attack_id')
+            if attack_id:
+                entities, _ = graph.fetch_linked_entities(attack_id)
+                if entities:
+                    data['ttps'] = [e['attck_id'] for e in entities.values() if e['type'] == 'technique']
         else:
             data['basis_id'] = user_input
             data['ttps'] = []
@@ -339,18 +346,44 @@ def handle_tabletop_input(user_input):
             return '<p>Please provide a valid positive number of injects.</p>'
         data['num_injects'] = num_injects
         session['tabletop_data'] = data
-        session.pop('tabletop_step', None)  # End the process
         session.modified = True
 
         # Generate the document
         result = asyncio.run(generate_tabletop_document(data))
-        session['conversation'].append({'sender': 'bot', 'text': result + '<p><a href="/download">Download Markdown</a></p>'})
-        html = '<h2>Tabletop Document Generated</h2>'
-        html += '<pre>' + result + '</pre>'
-        html += '<p><a href="/download">Download Markdown</a></p>'
+        if result.startswith("Error") or result.startswith("Failed"):
+            html = f'<p>{result}</p>'
+            html += '<p>Please try again or check the Ollama server configuration.</p>'
+        else:
+            # Store Markdown in session
+            session['markdown_content'] = result
+            html = '<h2>Tabletop Document Generated</h2>'
+            html += '<pre>' + result + '</pre>'
+            html += '<p><a href="/download">Download Markdown</a></p>'
+            session['conversation'].append({'sender': 'bot', 'text': html})
+        session.pop('tabletop_step', None)  # End the process
+        session.modified = True
         return html
 
     return '<p>Invalid tabletop state. Start a new exercise with <code>create tabletop</code>.</p>'
+
+@app.route('/download')
+def download_markdown():
+    """Serve the generated Markdown file for download."""
+    markdown_content = session.get('markdown_content')
+    if not markdown_content:
+        return "Error: No Markdown content available for download.", 404
+
+    # Create a file-like object
+    buffer = io.BytesIO()
+    buffer.write(markdown_content.encode('utf-8'))
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name='tabletop_exercise.md',
+        mimetype='text/markdown'
+    )
 
 async def generate_tabletop_document(data):
     """Generate a tabletop document using Ollama with the specified prompt."""
@@ -371,11 +404,38 @@ async def generate_tabletop_document(data):
     response = await query_ollama(prompt)
     return response
 
-@app.route('/')
+@app.route('/', methods=['GET', 'POST'])
 def index():
-    if 'conversation' not in session:
-        session['conversation'] = []
-    return render_template('index.html', conversation=session['conversation'], enable_tabletop=ENABLE_TABLETOP)
+    """Render the main chat interface and handle user input."""
+    if request.method == 'POST':
+        user_input = request.form.get('user_input', '').strip()
+        if not user_input:
+            return jsonify({'response': '<p>Please enter a command.</p>'})
+
+        if user_input.lower() == 'clear':
+            session['conversation'] = []
+            session['tabletop_step'] = None
+            session['tabletop_data'] = {}
+            session.modified = True
+            return jsonify({'response': '<p>Conversation cleared. Start with <code>create tabletop</code>.</p>'})
+
+        if user_input.lower() == 'create tabletop':
+            session['tabletop_step'] = 'day_time'
+            session['tabletop_data'] = {}
+            session.modified = True
+            response = '<p>Please specify the day and time for the tabletop exercise (e.g., "Monday morning"):</p>'
+        else:
+            response = handle_tabletop_input(user_input)
+
+        # Store conversation
+        if 'conversation' not in session:
+            session['conversation'] = []
+        session['conversation'].append({'sender': 'user', 'text': user_input})
+        session['conversation'].append({'sender': 'bot', 'text': response})
+        session.modified = True
+        return jsonify({'response': response})
+
+    return render_template('index.html')
 
 @app.route('/send', methods=['POST'])
 def send_message():
@@ -431,17 +491,6 @@ def clear_conversation():
     session.modified = True
     return jsonify({'status': 'cleared'})
 
-@app.route('/download', methods=['GET'])
-def download_tabletop():
-    if 'tabletop_data' not in session or 'mitre_data' not in session['tabletop_data']:
-        return "No tabletop document available for download.", 404
-    
-    data = session['tabletop_data']
-    document = asyncio.run(generate_tabletop_document(data))
-    buffer = io.BytesIO(document.encode('utf-8'))
-    buffer.seek(0)
-    filename = f"tabletop_{data['day_time'].replace(' ', '_')}_{data['scenario_type'].replace(' ', '_')}.md"
-    return send_file(buffer, as_attachment=True, download_name=filename, mimetype='text/markdown')
 
 if __name__ == '__main__':
     logger.info(f"Tabletop command is {'enabled' if ENABLE_TABLETOP else 'disabled'}")
