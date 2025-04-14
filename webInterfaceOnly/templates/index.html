@@ -59,7 +59,11 @@
             <ul class="command-list">
                 <li>
                     <span class="command">create tabletop</span>
-                    <span class="description">Start a new tabletop exercise.</span>
+                    <span class="description">Design a new tabletop exercise.</span>
+                </li>
+                <li>
+                    <span class="command">run tabletop</span>
+                    <span class="description">Run a tabletop exercise in a new tab.</span>
                 </li>
                 <li>
                     <span class="command">ttp id <ID></span>
@@ -116,6 +120,13 @@
             e.preventDefault();
             const message = userInput.value.trim();
             if (!message) return;
+
+            // Handle 'run tabletop' command
+            if (message === 'run tabletop') {
+                window.open('/run_tabletop', '_blank');
+                userInput.value = '';
+                return;
+            }
 
             // Display user message
             const userDiv = document.createElement('div');

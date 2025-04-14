@@ -812,9 +812,13 @@ def index():
 @login_required
 def send_message():
     """Handle AJAX message sending."""
-    user_input = request.form['message'].strip()
+    user_input = request.form['message'].strip().lower()
     if not user_input:
         return jsonify({'response': 'Please enter a message.'})
+
+    # Handle 'run tabletop' command (client-side redirect, no server response needed)
+    if user_input == 'run tabletop':
+        return jsonify({'response': 'Opening tabletop exercise in a new tab.'})
 
     save_conversation(current_user.id, 'user', user_input)
 
@@ -851,9 +855,10 @@ def send_message():
     
     return jsonify({'response': response})
 
-@app.route('/run-tabletop')
+@app.route('/run_tabletop')
 @login_required
 def run_tabletop():
+    """Render the tabletop exercise runtime environment."""
     return render_template('run_tabletop.html')
 
 @app.route('/clear', methods=['POST'])
