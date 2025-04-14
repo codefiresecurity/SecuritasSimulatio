@@ -5,30 +5,37 @@
     font-family: Arial, sans-serif;
 }
 
-body, html {
+html, body {
     height: 100%;
-    overflow: hidden; /* Prevent body scrolling */
+    overflow: hidden; /* No body scroll */
 }
 
 .container {
     display: flex;
-    height: 100vh; /* Full viewport height */
-    width: 100vw; /* Full viewport width */
+    height: 100vh;
+    width: 100vw;
     overflow: hidden;
 }
 
 .chat-area {
-    flex: 1; /* Take remaining space */
+    flex: 1;
     display: flex;
     flex-direction: column;
     background: #f5f5f5;
 }
 
+.chat-area h1 {
+    padding: 15px 20px;
+    font-size: 1.5em;
+    background: #4a90e2;
+    color: white;
+}
+
 .conversation {
-    flex: 1; /* Fill available space */
-    overflow-y: auto; /* Scroll only if content overflows */
+    flex: 1;
+    overflow-y: auto;
     padding: 20px;
-    max-height: calc(100vh - 60px); /* Account for input form height */
+    max-height: calc(100vh - 110px); /* Adjust for h1 and input */
 }
 
 .message {
@@ -38,14 +45,35 @@ body, html {
     max-width: 80%;
 }
 
-.message.bot {
-    background: #e0e7ff;
+.message.user {
+    background: #d1fae5;
     margin-left: auto;
 }
 
-.message.user {
-    background: #d1fae5;
+.message.bot {
+    background: #e0e7ff;
     margin-right: auto;
+}
+
+.message p {
+    word-wrap: break-word;
+}
+
+.graph-image {
+    max-width: 100%;
+    cursor: pointer;
+}
+
+.graph-image.enlarged {
+    max-width: 90vw;
+    max-height: 80vh;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 1000;
+    background: rgba(0,0,0,0.8);
+    padding: 10px;
 }
 
 .input-form {
@@ -78,33 +106,67 @@ body, html {
 }
 
 .commands-sidebar {
-    width: 300px; /* Fixed width for commands */
+    width: 300px;
     background: #1a1a1a;
     color: white;
     padding: 20px;
-    overflow-y: auto; /* Scroll if commands list is long */
-    border-left: 1px solid #333;
+    overflow-y: auto;
 }
 
-.commands-sidebar h3 {
-    margin-bottom: 15px;
-}
-
-.commands-sidebar ul {
-    list-style: none;
-}
-
-.commands-sidebar li {
+.commands-sidebar h2 {
+    font-size: 1.2em;
     margin-bottom: 10px;
 }
 
-.commands-sidebar code {
-    background: #333;
-    padding: 2px 5px;
-    border-radius: 3px;
+.commands-sidebar p {
+    font-size: 0.9em;
+    margin-bottom: 15px;
 }
 
-/* Responsive design */
+.command-list {
+    list-style: none;
+}
+
+.command-list li {
+    margin-bottom: 15px;
+}
+
+.command {
+    display: block;
+    background: #333;
+    padding: 5px 10px;
+    border-radius: 3px;
+    font-family: monospace;
+}
+
+.description {
+    font-size: 0.85em;
+    color: #ccc;
+}
+
+.note {
+    font-size: 0.8em;
+    color: #aaa;
+}
+
+footer {
+    position: absolute;
+    bottom: 10px;
+    left: 20px;
+    font-size: 0.8em;
+    color: #666;
+}
+
+footer a {
+    color: #4a90e2;
+    text-decoration: none;
+}
+
+footer a:hover {
+    text-decoration: underline;
+}
+
+/* Responsive */
 @media (max-width: 768px) {
     .container {
         flex-direction: column;
@@ -112,25 +174,39 @@ body, html {
 
     .commands-sidebar {
         width: 100%;
-        height: 200px; /* Fixed height on mobile */
-        border-left: none;
+        height: 200px;
         border-top: 1px solid #333;
     }
 
     .chat-area {
-        height: calc(100vh - 200px); /* Adjust for commands height */
+        height: calc(100vh - 200px);
     }
 
     .conversation {
-        max-height: calc(100vh - 260px); /* Adjust for input + commands */
+        max-height: calc(100vh - 310px); /* Adjust for h1, input, commands */
+    }
+
+    footer {
+        left: 10px;
+        bottom: 220px;
     }
 }
 
-/* Style tables to fit without scrolling */
+/* Tabletop-specific */
+pre {
+    max-height: 200px;
+    overflow-y: auto;
+    background: #fff;
+    padding: 10px;
+    border: 1px solid #ddd;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
 .tech-table {
     width: 100%;
     border-collapse: collapse;
-    max-height: 200px;
+    max-height: 150px;
     overflow-y: auto;
     display: block;
 }
@@ -139,15 +215,4 @@ body, html {
     padding: 8px;
     border: 1px solid #ddd;
     text-align: left;
-}
-
-/* Limit pre to avoid stretching */
-pre {
-    max-height: 300px;
-    overflow-y: auto;
-    background: #fff;
-    padding: 10px;
-    border: 1px solid #ddd;
-    white-space: pre-wrap;
-    word-wrap: break-word;
 }
