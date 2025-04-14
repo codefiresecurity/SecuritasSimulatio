@@ -3,86 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SecuritasSimulato</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <title>Securitas Simulatio</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <div class="container">
-        <!-- Left: Chat Area -->
-        <div class="chat-area">
-            <h1>SecuritasSimulato</h1>
-            <div class="conversation" id="chat-box">
-                {% for msg in session.get('conversation', []) %}
-                    <div class="message {{ msg.sender }}">
-                        <p>{{ msg.text | replace('\n', '<br>') | safe }}</p>
-                        {% if msg.image %}
-                            <img src="data:image/png;base64,{{ msg.image }}" alt="Graph" class="graph-image">
-                        {% endif %}
-                    </div>
-                {% endfor %}
+        <h1>Securitas Simulatio</h1>
+        <div class="user-info">
+            {% if current_user.is_authenticated %}
+                <p>Welcome, {{ current_user.username }}! <a href="{{ url_for('logout') }}">Logout</a></p>
+            {% else %}
+                <p><a href="{{ url_for('login') }}">Login</a> | <a href="{{ url_for('register') }}">Register</a></p>
+            {% endif %}
+        </div>
+        <div class="main-content">
+            <div id="chat-container">
+                <div id="chat-messages">
+                    {% if current_user.is_authenticated %}
+                        {% for msg in conversation %}
+                            <div class="message {{ 'user-message' if msg.sender == 'user' else 'bot-message' }}">
+                                {% if msg.sender == 'user' %}
+                                    <strong>You:</strong> {{ msg.text | safe }}
+                                {% else %}
+                                    <strong>Bot:</strong> {{ msg.text | safe }}
+                                    {% if msg.image %}
+                                        <img src="data:image/png;base64,{{ msg.image }}" alt="Graph" class="graph-image">
+                                    {% endif %}
+                                {% endif %}
+                            </div>
+                        {% endfor %}
+                    {% else %}
+                        <p>Please log in to view conversations.</p>
+                    {% endif %}
+                </div>
+                <form id="chat-form">
+                    <input type="text" id="user-input" name="message" placeholder="Enter command (e.g., create tabletop)" autocomplete="off">
+                    <button type="submit">Send</button>
+                </form>
+                {% if current_user.is_authenticated %}
+                    <button id="clear-button">Clear Conversation</button>
+                {% endif %}
             </div>
-            <form class="input-form" id="chat-form">
-                <input type="text" id="message" name="message" placeholder="e.g., create tabletop" autocomplete="off">
-                <button type="submit">Send</button>
-                <button type="button" id="clear-btn">Clear</button>
-            </form>
+            <div id="command-help">
+                <h2>Available Commands</h2>
+                <ul>
+                    <li><strong>create tabletop</strong>: Start a new tabletop exercise.</li>
+                    <li><strong>ttp id &lt;ID&gt;</strong>: Look up a technique by ID (e.g., T1059).</li>
+                    <li><strong>ttp search &lt;term&gt;</strong>: Search techniques by name or description.</li>
+                    <li><strong>ttp detail &lt;ID&gt;</strong>: Get detailed info for a technique.</li>
+                    <li><strong>group &lt;ID/name&gt;</strong>: Search for a group (e.g., G0027).</li>
+                    <li><strong>software &lt;ID/name&gt;</strong>: Search for software (e.g., S0002).</li>
+                    <li><strong>campaign &lt;ID/name&gt;</strong>: Search for a campaign (e.g., C0001).</li>
+                    <li><strong>graph &lt;ID&gt;</strong>: Generate a relationship graph for an ID.</li>
+                    <li><strong>recommend &lt;ID1,ID2,...&gt;</strong>: Get log source recommendations for TTPs.</li>
+                    <li><strong>group_ttps &lt;ID1,ID2,...&gt;</strong>: List TTPs used by groups.</li>
+                    <li><strong>clear</strong>: Clear your conversation history.</li>
+                </ul>
+                <p>Use commands to interact with MITRE ATT&CK data or create tabletop exercises with custom scenarios.</p>
+            </div>
         </div>
-        <!-- Right: Commands Sidebar -->
-        <div class="commands-sidebar">
-            <h2>Available Commands</h2>
-            <p>Use these to interact with the MITRE ATT&CK database:</p>
-            <ul class="command-list">
-                <li>
-                    <span class="command">ttp id &lt;ID&gt;</span>
-                    <span class="description">Get details for a TTP (e.g., <code>ttp id T1059</code>)</span>
-                </li>
-                <li>
-                    <span class="command">ttp search &lt;term&gt;</span>
-                    <span class="description">Search TTPs by name/keyword (e.g., <code>ttp search phishing</code>)</span>
-                </li>
-                <li>
-                    <span class="command">ttp detail &lt;ID&gt;</span>
-                    <span class="description">Detailed TTP info (e.g., <code>ttp detail T1059</code>)</span>
-                </li>
-                <li>
-                    <span class="command">recommend &lt;ID(s)&gt;</span>
-                    <span class="description">Log sources for TTPs, comma-separated (e.g., <code>recommend T1059,T1589</code>)</span>
-                </li>
-                <li>
-                    <span class="command">group_ttps &lt;Group ID(s)&gt;</span>
-                    <span class="description">TTPs for groups, comma-separated (e.g., <code>group_ttps G0007,G0059</code>)</span>
-                </li>
-                <li>
-                    <span class="command">graph &lt;ID&gt;</span>
-                    <span class="description">Relationship graph (e.g., <code>graph G0007</code>)</span>
-                </li>
-                <li>
-                    <span class="command">create tabletop</span>
-                    <span class="description">Start a tabletop exercise (e.g., <code>create tabletop</code>)</span>
-                </li>
-            </ul>
-            <p class="note">Note: IDs can be TTPs (Txxxx), Groups (Gxxxx), Software (Sxxxx), or Campaigns (Cxxxx). Tabletop commands are interactive.</p>
-        </div>
+        <footer>
+            <p>Generated by Ryan Wessels | <a href="https://github.com/yourusername">SecuritasSimulatio</a></p>
+        </footer>
     </div>
-    <footer>Created by Ryan Wessels | <a href="https://github.com/codefiresecurity/SecuritasSimulatio" target="_blank">SecuritasSimulatio</a></footer>
-
     <script>
-        const form = document.getElementById('chat-form');
-        const chatBox = document.getElementById('chat-box');
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+        const chatMessages = document.getElementById('chat-messages');
+        const clearButton = document.getElementById('clear-button');
 
-        form.addEventListener('submit', async (e) => {
+        chatForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const message = document.getElementById('message').value.trim();
+            const message = userInput.value.trim();
             if (!message) return;
 
+            // Display user message
             const userDiv = document.createElement('div');
-            userDiv.className = 'message user';
-            userDiv.innerHTML = `<p>${message.replace(/\n/g, '<br>')}</p>`;
-            chatBox.appendChild(userDiv);
-            chatBox.scrollTop = chatBox.scrollHeight;
+            userDiv.className = 'message user-message';
+            userDiv.innerHTML = `<strong>You:</strong> ${message}`;
+            chatMessages.appendChild(userDiv);
+            userInput.value = '';
+            chatMessages.scrollTop = chatMessages.scrollHeight;
 
-            document.getElementById('message').value = '';
-
+            // Send message to server
             const response = await fetch('/send', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -90,41 +93,34 @@
             });
             const data = await response.json();
 
+            // Display bot response
             const botDiv = document.createElement('div');
-            botDiv.className = 'message bot';
-            if (typeof data.response === 'object' && data.response.image) {
-                botDiv.innerHTML = `<p>${data.response.text.replace(/\n/g, '<br>')}</p><img src="data:image/png;base64,${data.response.image}" alt="Graph" class="graph-image">`;
-            } else {
-                botDiv.innerHTML = `<p>${data.response.replace(/\n/g, '<br>')}</p>`;
-            }
-            chatBox.appendChild(botDiv);
-            chatBox.scrollTop = chatBox.scrollHeight;
+            botDiv.className = 'message bot-message';
+            botDiv.innerHTML = `<strong>Bot:</strong> ${data.response}`;
+            chatMessages.appendChild(botDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
 
-            const images = botDiv.getElementsByClassName('graph-image');
-            for (let img of images) {
-                img.addEventListener('click', () => {
-                    img.classList.toggle('enlarged');
-                });
+            // Handle images
+            if (data.image) {
+                const img = document.createElement('img');
+                img.src = `data:image/png;base64,${data.image}`;
+                img.className = 'graph-image';
+                botDiv.appendChild(img);
             }
         });
 
-        document.getElementById('clear-btn').addEventListener('click', async () => {
-            const response = await fetch('/clear', { method: 'POST' });
-            const data = await response.json();
-            if (data.status === 'cleared') {
-                chatBox.innerHTML = '';
-            }
-        });
+        if (clearButton) {
+            clearButton.addEventListener('click', async () => {
+                await fetch('/clear', { method: 'POST' });
+                chatMessages.innerHTML = '';
+            });
+        }
 
-        document.addEventListener('DOMContentLoaded', () => {
-            const images = document.getElementsByClassName('graph-image');
-            for (let img of images) {
-                img.addEventListener('click', () => {
-                    img.classList.toggle('enlarged');
-                });
+        // Make graph images clickable
+        document.addEventListener('click', (e) => {
+            if (e.target.classList.contains('graph-image')) {
+                e.target.classList.toggle('enlarged');
             }
-            chatBox.scrollTop = chatBox.scrollHeight;
-            document.getElementById('message').focus();
         });
     </script>
 </body>

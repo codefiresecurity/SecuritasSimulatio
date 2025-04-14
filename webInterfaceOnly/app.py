@@ -1,5 +1,6 @@
-from flask import Flask, render_template, request, jsonify, session, send_file
+from flask import Flask, render_template, request, jsonify, session, send_file, redirect, url_for, flash
 from flask_session import Session
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 import os
 from dotenv import load_dotenv
 import mitre
@@ -11,6 +12,8 @@ import aiohttp
 import asyncio
 import json
 import datetime
+import mysql.connector
+import bcrypt
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -20,11 +23,50 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 ENABLE_TABLETOP = os.getenv("ENABLE_TABLETOP", "false").lower() == "true"
 OLLAMA_URL = os.getenv("OLLAMA_URL")
+DB_HOST = os.getenv("DB_HOST")
+DB_USER = os.getenv("DB_USER")
+DB_PASS = os.getenv("DB_PASS")
+DB = os.getenv("DB")
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 app.config['SESSION_TYPE'] = 'filesystem'
 Session(app)
+
+# Initialize Flask-Login
+login_manager = LoginManager()
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
+# User model
+class User(UserMixin):
+    def __init__(self, id, username):
+        self.id = id
+        self.username = username
+
+# Database connection
+def connect_to_db():
+    return mysql.connector.connect(
+        host=DB_HOST,
+        user=DB_USER,
+        password=DB_PASS,
+        database=DB
+    )
+
+@login_manager.user_loader
+def load_user(user_id):
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT id, username FROM users WHERE id = %s", (user_id,))
+        user = cursor.fetchone()
+        conn.close()
+        if user:
+            return User(user['id'], user['username'])
+        return None
+    except Exception as e:
+        logger.error(f"Error loading user: {e}")
+        return None
 
 def process_query(query_type, method=None, query=None):
     """Process user queries and return formatted responses."""
@@ -113,12 +155,10 @@ def process_query(query_type, method=None, query=None):
         
         msg = f"Log Source Recommendations for {', '.join(queries)}\n\n"
         
-        # Individual coverage summary
         msg += "**Coverage Summary:**\n"
         for q in queries:
             ttps = query_ttp_map[q]
             if ttps:
-                # Corrected coverage calculation
                 covered = sum(1 for ttp in ttps if any(ttp in source["covered_ttps"] for source in recommendations["log_sources"].values()))
                 total = len(ttps)
                 percent = (covered / total * 100) if total > 0 else 0
@@ -126,7 +166,6 @@ def process_query(query_type, method=None, query=None):
             else:
                 msg += f"- {q}: No TTPs found (0%)\n"
         
-        # Total coverage
         msg += (f"\n**Total Unique TTPs:** Queried: {recommendations['total_ttps']} | Covered: {recommendations['covered_ttps']} "
                 f"({recommendations['total_coverage_percentage']:.1f}%)\n"
                 "Log Sources:\n")
@@ -155,13 +194,11 @@ def process_query(query_type, method=None, query=None):
         if "error" in results:
             return results["error"]
         
-        # Part 1: Summary of all deduplicated TTPs
         all_ttps = results["all_ttps"]
         msg = "**Summary of All TTPs Used by Queried Groups**\n"
         msg += f"Total Unique TTPs: {len(all_ttps)}\n"
         msg += "\n".join(all_ttps) + "\n\n"
         
-        # Part 2: Individual group details (if multiple groups)
         if len(queries) > 1:
             for q in queries:
                 ttps = results["group_ttp_map"].get(q, [])
@@ -198,7 +235,7 @@ async def query_ollama(prompt):
     """Query the Ollama API and return the response."""
     async with aiohttp.ClientSession() as session:
         payload = {
-            "model": "phi3:latest",  # Updated to match ollama list output
+            "model": "phi3:latest",
             "prompt": prompt,
             "stream": False
         }
@@ -222,7 +259,6 @@ def fetch_mitre_details(scenario_type):
     scenario_type_lower = scenario_type.lower()
     mitre_data = {}
 
-    # Check if it's a TTP (e.g., T1059)
     if mitre.validate_ttp_id(scenario_type):
         details = mitre.get_technique_details(scenario_type)
         if details:
@@ -230,7 +266,6 @@ def fetch_mitre_details(scenario_type):
             mitre_data['details'] = details
             return mitre_data
 
-    # Check if it's a group (e.g., G0007 or APT28)
     if mitre.validate_group_id(scenario_type):
         groups = mitre.search_groups(scenario_type)
         if groups:
@@ -244,7 +279,6 @@ def fetch_mitre_details(scenario_type):
             mitre_data['details'] = groups[0]
             return mitre_data
 
-    # Check if it's a software (e.g., S0002)
     if mitre.validate_id(scenario_type, 'S'):
         software = mitre.search_software(scenario_type)
         if software:
@@ -258,7 +292,6 @@ def fetch_mitre_details(scenario_type):
             mitre_data['details'] = software[0]
             return mitre_data
 
-    # Check if it's a campaign (e.g., C0001)
     if mitre.validate_id(scenario_type, 'C'):
         campaigns = mitre.search_campaigns(scenario_type)
         if campaigns:
@@ -272,7 +305,6 @@ def fetch_mitre_details(scenario_type):
             mitre_data['details'] = campaigns[0]
             return mitre_data
 
-    # If no match, assume generic scenario (e.g., ransomware, data breach)
     return {'type': 'generic', 'details': scenario_type}
 
 def handle_tabletop_input(user_input):
@@ -303,7 +335,7 @@ def handle_tabletop_input(user_input):
             data['basis_id'] = (mitre_data['details'].get('group_id') or 
                                 mitre_data['details'].get('software_id') or 
                                 mitre_data['details'].get('campaign_id') or 
-                                user_input)  # Use G0027
+                                user_input)
             attack_id = data['basis_id']
             data['ttps'] = []
             if attack_id:
@@ -349,52 +381,32 @@ def handle_tabletop_input(user_input):
         session['tabletop_data'] = data
         session.modified = True
 
-        # Generate the document
         result = asyncio.run(generate_tabletop_document(data))
         if result.startswith("Error") or result.startswith("Failed"):
+            logger.error(f"Tabletop generation failed: {result}")
             html = f'<p>{result}</p>'
             html += '<p>Please try again or check the Ollama server configuration.</p>'
         else:
-            # Store Markdown in session
             session['markdown_content'] = result
             html = '<h2>Tabletop Document Generated</h2>'
             html += '<pre>' + result + '</pre>'
-            html += '<p><a href="/download">Download Markdown</a></p>'
-            session['conversation'].append({'sender': 'bot', 'text': html})
-        session.pop('tabletop_step', None)  # End the process
+            html += '<p><a href="/download" download>Download Markdown</a></p>'
+            if current_user.is_authenticated:
+                save_conversation(current_user.id, 'bot', html)
+        session.pop('tabletop_step', None)
+        session['tabletop_data'] = {}
         session.modified = True
         return html
 
     return '<p>Invalid tabletop state. Start a new exercise with <code>create tabletop</code>.</p>'
 
-@app.route('/download')
-def download_markdown():
-    """Serve the generated Markdown file for download."""
-    markdown_content = session.get('markdown_content')
-    if not markdown_content:
-        return "Error: No Markdown content available for download.", 404
-
-    # Create a file-like object
-    buffer = io.BytesIO()
-    buffer.write(markdown_content.encode('utf-8'))
-    buffer.seek(0)
-
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name='tabletop_exercise.md',
-        mimetype='text/markdown'
-    )
-
 async def generate_tabletop_document(data):
     """Generate a tabletop exercise document with inline JSON log entries."""
     try:
-        # Base timestamp for logs
         base_time = datetime.datetime.now().replace(
             hour=9, minute=0, second=0, microsecond=0
         ).isoformat() + "Z"
 
-        # Construct prompt
         ttps_str = ', '.join(data['ttps']) if data['ttps'] else 'None'
         prompt = f"""
         Generate a tabletop exercise document in Markdown format based on the following details:
@@ -425,7 +437,6 @@ async def generate_tabletop_document(data):
             return f"Error generating document: {response}"
         markdown = response
 
-        # Validate JSON logs in output
         import re
         json_blocks = re.findall(r'```json\n(.*?)\n```', markdown, re.DOTALL)
         for i, block in enumerate(json_blocks, 1):
@@ -433,7 +444,6 @@ async def generate_tabletop_document(data):
                 json.loads(block)
             except json.JSONDecodeError as e:
                 logger.warning(f"Invalid JSON in inject {i}: {e}")
-                # Fallback: Generate a basic JSON log
                 log_entry = {
                     "timestamp": (datetime.datetime.fromisoformat(base_time[:-1]) + 
                                  datetime.timedelta(minutes=5*i)).isoformat() + "Z",
@@ -451,21 +461,155 @@ async def generate_tabletop_document(data):
         logger.error(f"Error generating document: {e}")
         return f"Error generating document: {e}"
 
+@app.route('/download')
+@login_required
+def download_markdown():
+    """Serve the generated Markdown file for download."""
+    markdown_content = session.get('markdown_content')
+    if not markdown_content:
+        return "Error: No Markdown content available for download.", 404
+
+    buffer = io.BytesIO()
+    buffer.write(markdown_content.encode('utf-8'))
+    buffer.seek(0)
+
+    return send_file(
+        buffer,
+        as_attachment=True,
+        download_name='tabletop_exercise.md',
+        mimetype='text/markdown'
+    )
+
+def save_conversation(user_id, sender, text, image=None):
+    """Save a conversation message to the database."""
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO conversations (user_id, sender, text, image) VALUES (%s, %s, %s, %s)",
+            (user_id, sender, text, image)
+        )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Error saving conversation: {e}")
+
+def load_conversation(user_id):
+    """Load conversation history for a user."""
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT sender, text, image FROM conversations WHERE user_id = %s ORDER BY created_at",
+            (user_id,)
+        )
+        conversation = cursor.fetchall()
+        conn.close()
+        return conversation
+    except Exception as e:
+        logger.error(f"Error loading conversation: {e}")
+        return []
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    """Handle user registration."""
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        if not username or not password:
+            return render_template('register.html', error="Username and password are required.")
+        
+        try:
+            conn = connect_to_db()
+            cursor = conn.cursor()
+            cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+            if cursor.fetchone():
+                conn.close()
+                return render_template('register.html', error="Username already exists.")
+            
+            password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+            cursor.execute(
+                "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
+                (username, password_hash)
+            )
+            conn.commit()
+            conn.close()
+            return redirect(url_for('login'))
+        except Exception as e:
+            logger.error(f"Error registering user: {e}")
+            return render_template('register.html', error="Registration failed. Try again.")
+    
+    return render_template('register.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Handle user login."""
+    if current_user.is_authenticated:
+        return redirect(url_for('index'))
+    
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        try:
+            conn = connect_to_db()
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT id, username, password_hash FROM users WHERE username = %s", (username,))
+            user = cursor.fetchone()
+            conn.close()
+            
+            if user and bcrypt.checkpw(password.encode('utf-8'), user['password_hash']):
+                user_obj = User(user['id'], user['username'])
+                login_user(user_obj)
+                return redirect(url_for('index'))
+            else:
+                return render_template('login.html', error="Invalid username or password.")
+        except Exception as e:
+            logger.error(f"Error logging in: {e}")
+            return render_template('login.html', error="Login failed. Try again.")
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+@login_required
+def logout():
+    """Handle user logout."""
+    logout_user()
+    return redirect(url_for('login'))
+
 @app.route('/', methods=['GET', 'POST'])
+@login_required
 def index():
     """Render the main chat interface and handle user input."""
+    conversation = load_conversation(current_user.id)
+    
     if request.method == 'POST':
         user_input = request.form.get('user_input', '').strip()
         if not user_input:
             return jsonify({'response': '<p>Please enter a command.</p>'})
 
         if user_input.lower() == 'clear':
-            session['conversation'] = []
-            session['tabletop_step'] = None
-            session['tabletop_data'] = {}
-            session.modified = True
-            return jsonify({'response': '<p>Conversation cleared. Start with <code>create tabletop</code>.</p>'})
+            try:
+                conn = connect_to_db()
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM conversations WHERE user_id = %s", (current_user.id,))
+                conn.commit()
+                conn.close()
+                session.pop('tabletop_step', None)
+                session.pop('tabletop_data', None)
+                session['markdown_content'] = None
+                session.modified = True
+                return jsonify({'response': '<p>Conversation cleared. Start with <code>create tabletop</code>.</p>'})
+            except Exception as e:
+                logger.error(f"Error clearing conversation: {e}")
+                return jsonify({'response': '<p>Error clearing conversation.</p>'})
 
+        save_conversation(current_user.id, 'user', user_input)
+        
         if user_input.lower() == 'create tabletop':
             session['tabletop_step'] = 'day_time'
             session['tabletop_data'] = {}
@@ -474,27 +618,20 @@ def index():
         else:
             response = handle_tabletop_input(user_input)
 
-        # Store conversation
-        if 'conversation' not in session:
-            session['conversation'] = []
-        session['conversation'].append({'sender': 'user', 'text': user_input})
-        session['conversation'].append({'sender': 'bot', 'text': response})
-        session.modified = True
+        save_conversation(current_user.id, 'bot', response)
         return jsonify({'response': response})
 
-    return render_template('index.html')
+    return render_template('index.html', conversation=conversation)
 
 @app.route('/send', methods=['POST'])
+@login_required
 def send_message():
+    """Handle AJAX message sending."""
     user_input = request.form['message'].strip()
     if not user_input:
         return jsonify({'response': 'Please enter a message.'})
 
-    if 'conversation' not in session:
-        session['conversation'] = []
-
-    session['conversation'].append({'sender': 'user', 'text': user_input})
-    session.modified = True
+    save_conversation(current_user.id, 'user', user_input)
 
     if 'tabletop_step' in session and ENABLE_TABLETOP:
         response = handle_tabletop_input(user_input)
@@ -523,21 +660,30 @@ def send_message():
             response = process_query(query_type, None, query)
 
     if isinstance(response, dict) and 'image' in response:
-        session['conversation'].append({'sender': 'bot', 'text': response['text'], 'image': response['image']})
+        save_conversation(current_user.id, 'bot', response['text'], response['image'])
     else:
-        session['conversation'].append({'sender': 'bot', 'text': response})
-    session.modified = True
-
+        save_conversation(current_user.id, 'bot', response)
+    
     return jsonify({'response': response})
 
 @app.route('/clear', methods=['POST'])
+@login_required
 def clear_conversation():
-    session['conversation'] = []
-    session.pop('tabletop_step', None)
-    session.pop('tabletop_data', None)
-    session.modified = True
-    return jsonify({'status': 'cleared'})
-
+    """Clear the user's conversation history."""
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM conversations WHERE user_id = %s", (current_user.id,))
+        conn.commit()
+        conn.close()
+        session.pop('tabletop_step', None)
+        session.pop('tabletop_data', None)
+        session['markdown_content'] = None
+        session.modified = True
+        return jsonify({'status': 'cleared'})
+    except Exception as e:
+        logger.error(f"Error clearing conversation: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to clear conversation.'})
 
 if __name__ == '__main__':
     logger.info(f"Tabletop command is {'enabled' if ENABLE_TABLETOP else 'disabled'}")
