@@ -149,6 +149,8 @@
                 img.className = 'graph-image';
                 botDiv.innerHTML = '<p><strong>Bot:</strong></p>';
                 botDiv.appendChild(img);
+                conversation.appendChild(botDiv);
+                conversation.scrollTop = conversation.scrollHeight;
                 console.log("Right place");
             }
         });
