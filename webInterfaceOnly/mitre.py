@@ -147,23 +147,22 @@ def search_groups(query: str) -> Optional[List[Dict[str, any]]]:
             query_sql = """
                 SELECT g.id AS attack_id, g.name, g.description, er.external_id AS group_id
                 FROM groups g
-                JOIN external_references er ON g.id = er.technique_id
-                WHERE er.source_name = 'mitre-attack'
-                AND er.external_id = %s
+                LEFT JOIN group_external_references er ON g.id = er.group_id
+                WHERE er.source_name = 'mitre-attack' AND er.external_id = %s
             """
             cursor.execute(query_sql, (query,))
         else:
             query_sql = """
                 SELECT g.id AS attack_id, g.name, g.description, er.external_id AS group_id
                 FROM groups g
-                LEFT JOIN external_references er ON g.id = er.technique_id AND er.source_name = 'mitre-attack'
+                LEFT JOIN group_external_references er ON g.id = er.group_id
                 WHERE g.name LIKE %s
             """
             cursor.execute(query_sql, (f"%{query}%",))
 
         groups = cursor.fetchall()
         if not groups:
-            logger.info(f"No groups found for query: {query}\n {query_sql}")
+            logger.info(f"No groups found for query: {query}")
             conn.close()
             return []
 
@@ -365,7 +364,7 @@ def get_group_ttps(queries: List[str]) -> Dict[str, any]:
         logger.error(f"Error fetching group TTPs: {e}")
         return {"error": f"Error fetching group TTPs: {str(e)}"}
     
-def fetch_mitre_details(identifier: str) -> Dict[str, any]:
+def fetch_mitre_details(identifier: str) -> Dict[str, any]:def fetch_mitre_details(identifier: str) -> Dict[str, any]:
     """Fetch details for a MITRE ATT&CK group, software, campaign, or generic term."""
     try:
         conn = connect_to_db()
@@ -377,9 +376,9 @@ def fetch_mitre_details(identifier: str) -> Dict[str, any]:
             cursor.execute("""
                 SELECT g.id AS attack_id, g.name, g.description, er.external_id AS group_id
                 FROM groups g
-                LEFT JOIN group_external_references er ON g.id = er.group_id AND er.source_name = 'mitre-attack'
-                WHERE (er.external_id = %s OR g.id LIKE %s)
-            """, (identifier, f"%{identifier}%"))
+                LEFT JOIN group_external_references er ON g.id = er.group_id
+                WHERE er.source_name = 'mitre-attack' AND er.external_id = %s
+            """, (identifier,))
             group = cursor.fetchone()
             if group:
                 logger.info(f"Found group: {group}")
@@ -394,7 +393,7 @@ def fetch_mitre_details(identifier: str) -> Dict[str, any]:
             cursor.execute("""
                 SELECT s.id AS attack_id, s.name, s.description, s.software_type, ser.external_id AS software_id
                 FROM software s
-                JOIN software_external_references ser ON s.id = ser.software_id
+                LEFT JOIN software_external_references ser ON s.id = ser.software_id
                 WHERE ser.source_name = 'mitre-attack' AND ser.external_id = %s
             """, (identifier,))
             software = cursor.fetchone()
@@ -411,7 +410,7 @@ def fetch_mitre_details(identifier: str) -> Dict[str, any]:
             cursor.execute("""
                 SELECT c.id AS attack_id, c.name, c.description, cer.external_id AS campaign_id
                 FROM campaigns c
-                JOIN campaign_external_references cer ON c.id = cer.campaign_id
+                LEFT JOIN campaign_external_references cer ON c.id = cer.campaign_id
                 WHERE cer.source_name = 'mitre-attack' AND cer.external_id = %s
             """, (identifier,))
             campaign = cursor.fetchone()
