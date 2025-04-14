@@ -143,6 +143,7 @@
             console.log(data.response);
             // Handle images
             if (data.image) {
+                console.log('top of image');
                 const img = document.createElement('img');
                 img.src = `data:image/png;base64,${data.image}`;
                 img.className = 'graph-image';
