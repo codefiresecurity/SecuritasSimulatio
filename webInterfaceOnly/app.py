@@ -14,6 +14,7 @@ import json
 import datetime
 import mysql.connector
 import bcrypt
+import re
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
