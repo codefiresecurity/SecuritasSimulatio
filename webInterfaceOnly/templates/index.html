@@ -139,7 +139,7 @@
             botDiv.innerHTML = `<p><strong>Bot:</strong> ${data.response}</p>`;
             conversation.appendChild(botDiv);
             conversation.scrollTop = conversation.scrollHeight;
-
+            console.log("Outside right place.");
             // Handle images
             if (data.image) {
                 const img = document.createElement('img');
