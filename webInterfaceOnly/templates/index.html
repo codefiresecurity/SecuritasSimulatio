@@ -8,20 +8,20 @@
 </head>
 <body>
     <div class="container">
-        <h1>Securitas Simulatio</h1>
-        <div class="user-info">
-            {% if current_user.is_authenticated %}
-                <p>Welcome, {{ current_user.username }}! <a href="{{ url_for('logout') }}">Logout</a></p>
-            {% else %}
-                <p><a href="{{ url_for('login') }}">Login</a> | <a href="{{ url_for('register') }}">Register</a></p>
-            {% endif %}
-        </div>
-        <div class="main-content">
-            <div id="chat-container">
-                <div id="chat-messages">
-                    {% if current_user.is_authenticated %}
-                        {% for msg in conversation %}
-                            <div class="message {{ 'user-message' if msg.sender == 'user' else 'bot-message' }}">
+        <div class="chat-area">
+            <h1>Securitas Simulatio</h1>
+            <div class="user-info">
+                {% if current_user.is_authenticated %}
+                    <span>Welcome, {{ current_user.username }}! <a href="{{ url_for('logout') }}">Logout</a></span>
+                {% else %}
+                    <span><a href="{{ url_for('login') }}">Login</a> | <a href="{{ url_for('register') }}">Register</a></span>
+                {% endif %}
+            </div>
+            <div class="conversation">
+                {% if current_user.is_authenticated %}
+                    {% for msg in conversation %}
+                        <div class="message {{ 'user' if msg.sender == 'user' else 'bot' }}">
+                            <p>
                                 {% if msg.sender == 'user' %}
                                     <strong>You:</strong> {{ msg.text | safe }}
                                 {% else %}
@@ -30,46 +30,80 @@
                                         <img src="data:image/png;base64,{{ msg.image }}" alt="Graph" class="graph-image">
                                     {% endif %}
                                 {% endif %}
-                            </div>
-                        {% endfor %}
-                    {% else %}
-                        <p>Please log in to view conversations.</p>
-                    {% endif %}
-                </div>
-                <form id="chat-form">
-                    <input type="text" id="user-input" name="message" placeholder="Enter command (e.g., create tabletop)" autocomplete="off">
-                    <button type="submit">Send</button>
-                </form>
-                {% if current_user.is_authenticated %}
-                    <button id="clear-button">Clear Conversation</button>
+                            </p>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <p>Please log in to view conversations.</p>
                 {% endif %}
             </div>
-            <div id="command-help">
-                <h2>Available Commands</h2>
-                <ul>
-                    <li><strong>create tabletop</strong>: Start a new tabletop exercise.</li>
-                    <li><strong>ttp id &lt;ID&gt;</strong>: Look up a technique by ID (e.g., T1059).</li>
-                    <li><strong>ttp search &lt;term&gt;</strong>: Search techniques by name or description.</li>
-                    <li><strong>ttp detail &lt;ID&gt;</strong>: Get detailed info for a technique.</li>
-                    <li><strong>group &lt;ID/name&gt;</strong>: Search for a group (e.g., G0027).</li>
-                    <li><strong>software &lt;ID/name&gt;</strong>: Search for software (e.g., S0002).</li>
-                    <li><strong>campaign &lt;ID/name&gt;</strong>: Search for a campaign (e.g., C0001).</li>
-                    <li><strong>graph &lt;ID&gt;</strong>: Generate a relationship graph for an ID.</li>
-                    <li><strong>recommend &lt;ID1,ID2,...&gt;</strong>: Get log source recommendations for TTPs.</li>
-                    <li><strong>group_ttps &lt;ID1,ID2,...&gt;</strong>: List TTPs used by groups.</li>
-                    <li><strong>clear</strong>: Clear your conversation history.</li>
-                </ul>
-                <p>Use commands to interact with MITRE ATT&CK data or create tabletop exercises with custom scenarios.</p>
-            </div>
+            <form class="input-form">
+                <input type="text" id="user-input" name="message" placeholder="Enter command (e.g., create tabletop)" autocomplete="off">
+                <button type="submit">Send</button>
+            </form>
+            {% if current_user.is_authenticated %}
+                <button id="clear-button">Clear Conversation</button>
+            {% endif %}
+        </div>
+        <div class="commands-sidebar">
+            <h2>Available Commands</h2>
+            <p>Use these commands to interact with MITRE ATT&CK data or create tabletop exercises.</p>
+            <ul class="command-list">
+                <li>
+                    <span class="command">create tabletop</span>
+                    <span class="description">Start a new tabletop exercise.</span>
+                </li>
+                <li>
+                    <span class="command">ttp id &lt;ID&gt;</span>
+                    <span class="description">Look up a technique by ID (e.g., T1059).</span>
+                </li>
+                <li>
+                    <span class="command">ttp search &lt;term&gt;</span>
+                    <span class="description">Search techniques by name or description.</span>
+                </li>
+                <li>
+                    <span class="command">ttp detail &lt;ID&gt;</span>
+                    <span class="description">Get detailed info for a technique.</span>
+                </li>
+                <li>
+                    <span class="command">group &lt;ID/name&gt;</span>
+                    <span class="description">Search for a group (e.g., G0027).</span>
+                </li>
+                <li>
+                    <span class="command">software &lt;ID/name&gt;</span>
+                    <span class="description">Search for software (e.g., S0002).</span>
+                </li>
+                <li>
+                    <span class="command">campaign &lt;ID/name&gt;</span>
+                    <span class="description">Search for a campaign (e.g., C0001).</span>
+                </li>
+                <li>
+                    <span class="command">graph &lt;ID&gt;</span>
+                    <span class="description">Generate a relationship graph for an ID.</span>
+                </li>
+                <li>
+                    <span class="command">recommend &lt;ID1,ID2,...&gt;</span>
+                    <span class="description">Get log source recommendations for TTPs.</span>
+                </li>
+                <li>
+                    <span class="command">group_ttps &lt;ID1,ID2,...&gt;</span>
+                    <span class="description">List TTPs used by groups.</span>
+                </li>
+                <li>
+                    <span class="command">clear</span>
+                    <span class="description">Clear your conversation history.</span>
+                </li>
+            </ul>
+            <p class="note">Commands are case-insensitive. Use IDs or names as shown.</p>
         </div>
         <footer>
             <p>Generated by Ryan Wessels | <a href="https://github.com/yourusername">SecuritasSimulatio</a></p>
         </footer>
     </div>
     <script>
-        const chatForm = document.getElementById('chat-form');
+        const chatForm = document.querySelector('.input-form');
         const userInput = document.getElementById('user-input');
-        const chatMessages = document.getElementById('chat-messages');
+        const conversation = document.querySelector('.conversation');
         const clearButton = document.getElementById('clear-button');
 
         chatForm.addEventListener('submit', async (e) => {
@@ -79,11 +113,11 @@
 
             // Display user message
             const userDiv = document.createElement('div');
-            userDiv.className = 'message user-message';
-            userDiv.innerHTML = `<strong>You:</strong> ${message}`;
-            chatMessages.appendChild(userDiv);
+            userDiv.className = 'message user';
+            userDiv.innerHTML = `<p><strong>You:</strong> ${message}</p>`;
+            conversation.appendChild(userDiv);
             userInput.value = '';
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            conversation.scrollTop = conversation.scrollHeight;
 
             // Send message to server
             const response = await fetch('/send', {
@@ -95,10 +129,10 @@
 
             // Display bot response
             const botDiv = document.createElement('div');
-            botDiv.className = 'message bot-message';
-            botDiv.innerHTML = `<strong>Bot:</strong> ${data.response}`;
-            chatMessages.appendChild(botDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            botDiv.className = 'message bot';
+            botDiv.innerHTML = `<p><strong>Bot:</strong> ${data.response}</p>`;
+            conversation.appendChild(botDiv);
+            conversation.scrollTop = conversation.scrollHeight;
 
             // Handle images
             if (data.image) {
@@ -112,7 +146,7 @@
         if (clearButton) {
             clearButton.addEventListener('click', async () => {
                 await fetch('/clear', { method: 'POST' });
-                chatMessages.innerHTML = '';
+                conversation.innerHTML = '';
             });
         }
 
