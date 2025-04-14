@@ -44,7 +44,6 @@ def fetch_linked_entities(query: str) -> tuple[Dict[str, any], List[tuple]]:
     conn = connect_to_db()
     cursor = conn.cursor(dictionary=True)
 
-    # Check if query is a UUID (internal attack_id) or ATT&CK ID
     is_uuid = re.match(r'^[a-z]+--[0-9a-f-]+$', query, re.I)
     focal_entity = None
     entity_type = None
@@ -53,7 +52,6 @@ def fetch_linked_entities(query: str) -> tuple[Dict[str, any], List[tuple]]:
     id_field = None
 
     if is_uuid:
-        # Try each entity type to find the matching UUID
         for _type, _table, _ref_table, _id_field in [
             ('group', 'groups', 'group_external_references', 'group_id'),
             ('technique', 'techniques', 'external_references', 'technique_id'),
@@ -68,13 +66,15 @@ def fetch_linked_entities(query: str) -> tuple[Dict[str, any], List[tuple]]:
             """, (query,))
             focal_entity = cursor.fetchone()
             if focal_entity:
+                logger.info(f"Found entity in {_table} for UUID: {query}")
                 entity_type = _type
                 table = _table
                 ref_table = _ref_table
                 id_field = _id_field
                 break
+            else:
+                logger.debug(f"No entity in {_table} for UUID: {query}")
     else:
-        # Handle ATT&CK ID or name
         if validate_id(query, 'T'):
             entity_type = 'technique'
             table = 'techniques'
@@ -101,7 +101,6 @@ def fetch_linked_entities(query: str) -> tuple[Dict[str, any], List[tuple]]:
             ref_table = 'group_external_references'
             id_field = 'group_id'
 
-        # Fetch focal entity
         if entity_type in ['technique', 'group', 'software', 'campaign'] and validate_id(query, entity_type[0].upper()):
             query_sql = f"""
                 SELECT t.id AS attack_id, t.name, er.external_id AS attck_id
@@ -121,6 +120,8 @@ def fetch_linked_entities(query: str) -> tuple[Dict[str, any], List[tuple]]:
             cursor.execute(query_sql, (f"%{query}%",))
 
         focal_entity = cursor.fetchone()
+        if focal_entity:
+            logger.info(f"Found entity for ATT&CK ID/name: {query}")
 
     if not focal_entity:
         logger.warning(f"No focal entity found for query: {query}")
