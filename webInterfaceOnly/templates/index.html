@@ -136,16 +136,16 @@
             // Display bot response
             const botDiv = document.createElement('div');
             botDiv.className = 'message bot';
-            botDiv.innerHTML = `<p><strong>Bot:</strong> ${data.response}</p>`;
-            conversation.appendChild(botDiv);
-            conversation.scrollTop = conversation.scrollHeight;
-            console.log(data.image);
-            console.log(data.response);
+            if (!data.response.image){
+                botDiv.innerHTML = `<p><strong>Bot:</strong> ${data.response}</p>`;
+                conversation.appendChild(botDiv);
+                conversation.scrollTop = conversation.scrollHeight;
+            }
             // Handle images
             if (data.response.image) {
-                console.log('top of image');
+             
                 const img = document.createElement('img');
-                img.src = `data:image/png;base64,${data.image}`;
+                img.src = `data:image/png;base64,${data.response.image}`;
                 img.className = 'graph-image';
                 botDiv.appendChild(img);
                 console.log("Right place");
