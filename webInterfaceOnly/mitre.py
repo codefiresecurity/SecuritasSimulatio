@@ -373,19 +373,24 @@ def fetch_mitre_details(identifier: str) -> Dict[str, any]:
 
         # Check if identifier is a group
         if validate_group_id(identifier):
+            logger.info(f"Searching for group with ID: {identifier}")
             cursor.execute("""
                 SELECT g.id AS attack_id, g.name, g.description, er.external_id AS group_id
                 FROM groups g
-                JOIN group_external_references er ON g.id = er.group_id
-                WHERE er.source_name = 'mitre-attack' AND er.external_id = %s
-            """, (identifier,))
+                LEFT JOIN group_external_references er ON g.id = er.group_id AND er.source_name = 'mitre-attack'
+                WHERE (er.external_id = %s OR g.id LIKE %s)
+            """, (identifier, f"%{identifier}%"))
             group = cursor.fetchone()
             if group:
+                logger.info(f"Found group: {group}")
                 conn.close()
                 return {'type': 'group', 'details': group}
+            else:
+                logger.warning(f"No group found for ID: {identifier}")
 
         # Check if identifier is a software
         if validate_id(identifier, 'S'):
+            logger.info(f"Searching for software with ID: {identifier}")
             cursor.execute("""
                 SELECT s.id AS attack_id, s.name, s.description, s.software_type, ser.external_id AS software_id
                 FROM software s
@@ -394,11 +399,15 @@ def fetch_mitre_details(identifier: str) -> Dict[str, any]:
             """, (identifier,))
             software = cursor.fetchone()
             if software:
+                logger.info(f"Found software: {software}")
                 conn.close()
                 return {'type': 'software', 'details': software}
+            else:
+                logger.warning(f"No software found for ID: {identifier}")
 
         # Check if identifier is a campaign
         if validate_id(identifier, 'C'):
+            logger.info(f"Searching for campaign with ID: {identifier}")
             cursor.execute("""
                 SELECT c.id AS attack_id, c.name, c.description, cer.external_id AS campaign_id
                 FROM campaigns c
@@ -407,11 +416,15 @@ def fetch_mitre_details(identifier: str) -> Dict[str, any]:
             """, (identifier,))
             campaign = cursor.fetchone()
             if campaign:
+                logger.info(f"Found campaign: {campaign}")
                 conn.close()
                 return {'type': 'campaign', 'details': campaign}
+            else:
+                logger.warning(f"No campaign found for ID: {identifier}")
 
         # If not found, treat as generic term
         conn.close()
+        logger.info(f"Treating identifier as generic term: {identifier}")
         return {'type': 'generic', 'details': {'name': identifier}}
 
     except mysql.connector.Error as e:
