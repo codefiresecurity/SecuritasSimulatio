@@ -386,23 +386,66 @@ def download_markdown():
     )
 
 async def generate_tabletop_document(data):
-    """Generate a tabletop document using Ollama with the specified prompt."""
-    basis_id = data.get('basis_id', 'TTP Chain')
-    prompt = (
-        "Generate a tabletop facilitation document in Markdown format for a cybersecurity exercise with the following details:\n"
-        f"- Day and Time: {data['day_time']}\n"
-        f"- Technologies in Use: {', '.join(data['technologies'])}\n"
-        f"- Number of Injects: {data['num_injects']}\n"
-        f"- Attack Basis: {data['basis_type']} ({basis_id})\n"
-        f"- TTPs Involved: {', '.join(data['ttps']) if data['ttps'] else 'None'}\n\n"
-        "Include:\n"
-        "1. A short narrative of the event (200-300 words) under a `## Narrative` heading.\n"
-        "2. Each inject with a corresponding sample log file from a relevant system (e.g., Fortinet, Microsoft AD) under `## Injects` with subheadings `### Inject X`.\n"
-        "3. Facilitation tips under a `## Facilitation Tips` heading.\n"
-        "Use Markdown syntax (e.g., `##`, `###`, `-` for lists, ``` for code blocks)."
-    )
-    response = await query_ollama(prompt)
-    return response
+    """Generate a tabletop exercise document with inline JSON log entries."""
+    try:
+        # Base timestamp for logs
+        base_time = datetime.datetime.now().replace(
+            hour=9, minute=0, second=0, microsecond=0
+        ).isoformat() + "Z"
+
+        # Construct prompt
+        ttps_str = ', '.join(data['ttps']) if data['ttps'] else 'None'
+        prompt = f"""
+        Generate a tabletop exercise document in Markdown format based on the following details:
+        - **Day and Time**: {data['day_time']}
+        - **Basis**: {data['basis_id']} ({data['basis_type']})
+        - **Technologies**: {', '.join(data['technologies'])}
+        - **Number of Injects**: {data['num_injects']}
+        - **TTPs**: {ttps_str}
+
+        The document must include:
+        1. A **Narrative** section describing the scenario context (e.g., based on the basis and technologies).
+        2. Exactly **{data['num_injects']} Injects**, each with:
+           - A unique title (e.g., "Inject 1: Initial Compromise").
+           - A description of the event, aligned with the TTPs (if provided) or basis/technologies.
+           - An objective for the participants (e.g., "Identify the suspicious activity").
+           - A **Log Evidence** section containing one unique JSON-formatted log entry, enclosed in ```json ``` code blocks.
+             - The log should reflect the inject’s event (e.g., for T1059, include a command execution log).
+             - Include fields like `timestamp` (start from {base_time}, increment by 5 minutes per inject), `event`, and context-specific fields (e.g., `source_ip`, `command`, `port`).
+             - Tailor logs to technologies (e.g., AWS CloudTrail format for AWS, syslog for Cisco).
+             - Do NOT reference external files like 'logfile_sample.txt'.
+        3. A **Facilitation Tips** section with guidance for running the exercise.
+
+        Ensure each JSON log is unique, realistic, and relevant to the inject’s scenario.
+        """
+        response = await ollama.generate(model="llama3", prompt=prompt)
+        markdown = response['response']
+
+        # Validate JSON logs in output
+        import re
+        json_blocks = re.findall(r'```json\n(.*?)\n```', markdown, re.DOTALL)
+        for i, block in enumerate(json_blocks, 1):
+            try:
+                json.loads(block)
+            except json.JSONDecodeError as e:
+                logger.warning(f"Invalid JSON in inject {i}: {e}")
+                # Fallback: Generate a basic JSON log
+                log_entry = {
+                    "timestamp": (datetime.datetime.fromisoformat(base_time[:-1]) + 
+                                 datetime.timedelta(minutes=5*i)).isoformat() + "Z",
+                    "event": f"Activity for inject {i}",
+                    "source": "unknown",
+                    "details": "Generated due to invalid JSON"
+                }
+                markdown = markdown.replace(
+                    f'```json\n{block}\n```',
+                    f'```json\n{json.dumps(log_entry, indent=2)}\n```'
+                )
+
+        return markdown
+    except Exception as e:
+        logger.error(f"Error generating document: {e}")
+        return f"Error generating document: {e}"
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
