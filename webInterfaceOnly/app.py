@@ -197,12 +197,15 @@ async def query_ollama(prompt):
     """Query the Ollama API and return the response."""
     async with aiohttp.ClientSession() as session:
         payload = {
-            "model": "phi3",  # Adjust model as needed
+            "model": "phi3:latest",  # Updated to match ollama list output
             "prompt": prompt,
             "stream": False
         }
+        endpoint = f"{OLLAMA_URL}/api/generate"
+        logger.info(f"Querying Ollama at {endpoint} with model phi3:latest")
         try:
-            async with session.post(f"{OLLAMA_URL}/api/generate", json=payload) as response:
+            async with session.post(endpoint, json=payload) as response:
+                logger.info(f"Ollama response status: {response.status}")
                 if response.status == 200:
                     result = await response.json()
                     return result.get("response", "No response from Ollama.")
