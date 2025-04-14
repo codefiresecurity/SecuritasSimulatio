@@ -371,37 +371,55 @@ def handle_tabletop_input(user_input):
         return html
 
     elif step == 'num_injects':
-        try:
-            num_injects = int(user_input)
-            if num_injects <= 0:
-                raise ValueError
-        except ValueError:
-            return '<p>Please provide a valid positive number of injects.</p>'
-        data['num_injects'] = num_injects
-        session['tabletop_data'] = data
-        session.modified = True
+    try:
+        num_injects = int(user_input)
+        if num_injects <= 0:
+            raise ValueError
+    except ValueError:
+        return '<p>Please provide a valid positive number of injects.</p>'
+    data['num_injects'] = num_injects
+    session['tabletop_data'] = data
+    session.modified = True
 
-        result = asyncio.run(generate_tabletop_document(data))
-        if result.startswith("Error") or result.startswith("Failed"):
-            logger.error(f"Tabletop generation failed: {result}")
-            html = f'<p>{result}</p>'
-            html += '<p>Please try again or check the Ollama server configuration.</p>'
-        else:
-            session['markdown_content'] = result
-            html = '<h2>Tabletop Document Generated</h2>'
-            html += '<pre>' + result + '</pre>'
-            html += '<p><a href="/download" download>Download Markdown</a></p>'
-            if current_user.is_authenticated:
-                save_conversation(current_user.id, 'bot', html)
-        session.pop('tabletop_step', None)
-        session['tabletop_data'] = {}
-        session.modified = True
-        return html
+    result = asyncio.run(generate_tabletop_document(data))
+    if isinstance(result, str) and (result.startswith("Error") or result.startswith("Failed")):
+        logger.error(f"Tabletop generation failed: {result}")
+        html = f'<p>{result}</p>'
+        html += '<p>Please try again or check the Ollama server configuration.</p>'
+    else:
+        markdown = result['markdown']
+        json_data = result['json']
+        session['markdown_content'] = markdown
+
+        # Save JSON to tabletops table
+        try:
+            conn = connect_to_db()
+            cursor = conn.cursor()
+            filename = f"tabletop_{data['basis_id']}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+            cursor.execute(
+                "INSERT INTO tabletops (user_id, json_data, filename) VALUES (%s, %s, %s)",
+                (current_user.id, json.dumps(json_data), filename)
+            )
+            conn.commit()
+            conn.close()
+            logger.info(f"Saved tabletop JSON for user {current_user.id} as {filename}")
+        except Exception as e:
+            logger.error(f"Error saving tabletop JSON: {e}")
+
+        html = '<h2>Tabletop Document Generated</h2>'
+        html += '<pre>' + markdown + '</pre>'
+        html += '<p><a href="/download" download>Download Markdown</a></p>'
+        if current_user.is_authenticated:
+            save_conversation(current_user.id, 'bot', html)
+    session.pop('tabletop_step', None)
+    session['tabletop_data'] = {}
+    session.modified = True
+    return html
 
     return '<p>Invalid tabletop state. Start a new exercise with <code>create tabletop</code>.</p>'
 
 async def generate_tabletop_document(data):
-    """Generate a tabletop exercise document with inline JSON log entries."""
+    """Generate a tabletop exercise document with inline JSON log entries and a JSON version."""
     try:
         base_time = datetime.datetime.now().replace(
             hour=9, minute=0, second=0, microsecond=0
@@ -435,10 +453,78 @@ async def generate_tabletop_document(data):
         if response.startswith("Error") or response.startswith("Failed"):
             logger.error(f"Ollama query failed: {response}")
             return f"Error generating document: {response}"
+
         markdown = response
 
-        import re
+        # Extract JSON blocks and structure JSON output
         json_blocks = re.findall(r'```json\n(.*?)\n```', markdown, re.DOTALL)
+        json_data = {
+            "day_time": data['day_time'],
+            "basis": {
+                "id": data['basis_id'],
+                "type": data['basis_type']
+            },
+            "technologies": data['technologies'],
+            "num_injects": data['num_injects'],
+            "ttps": data['ttps'],
+            "narrative": "",
+            "injects": [],
+            "facilitation_tips": ""
+        }
+
+        # Parse Markdown to populate JSON
+        lines = markdown.split('\n')
+        current_section = None
+        current_inject = None
+        inject_count = 0
+
+        for line in lines:
+            line = line.strip()
+            if line.startswith('# Narrative'):
+                current_section = 'narrative'
+                json_data['narrative'] = []
+            elif line.startswith('# Inject'):
+                current_section = 'injects'
+                inject_count += 1
+                current_inject = {
+                    "title": line,
+                    "description": [],
+                    "objective": [],
+                    "log_entry": json_blocks[inject_count-1] if inject_count-1 < len(json_blocks) else "{}"
+                }
+                json_data['injects'].append(current_inject)
+            elif line.startswith('# Facilitation Tips'):
+                current_section = 'facilitation_tips'
+                json_data['facilitation_tips'] = []
+            elif line and current_section:
+                if current_section == 'narrative':
+                    json_data['narrative'].append(line)
+                elif current_section == 'facilitation_tips':
+                    json_data['facilitation_tips'].append(line)
+                elif current_section == 'injects' and current_inject:
+                    if line.startswith('**Objective**:'):
+                        current_inject['objective'].append(line.replace('**Objective**: ', ''))
+                    elif not line.startswith('```'):
+                        current_inject['description'].append(line)
+
+        # Convert lists to strings for cleaner JSON
+        json_data['narrative'] = '\n'.join(json_data['narrative'])
+        json_data['facilitation_tips'] = '\n'.join(json_data['facilitation_tips'])
+        for inject in json_data['injects']:
+            inject['description'] = '\n'.join(inject['description'])
+            inject['objective'] = '\n'.join(inject['objective'])
+            try:
+                inject['log_entry'] = json.loads(inject['log_entry'])
+            except json.JSONDecodeError:
+                inject['log_entry'] = {
+                    "timestamp": (datetime.datetime.fromisoformat(base_time[:-1]) + 
+                                 datetime.timedelta(minutes=5*(json_data['injects'].index(inject)+1))).isoformat() + "Z",
+                    "event": f"Activity for {inject['title']}",
+                    "source": "unknown",
+                    "details": "Generated due to invalid JSON"
+                }
+
+        # Validate JSON blocks
         for i, block in enumerate(json_blocks, 1):
             try:
                 json.loads(block)
@@ -456,7 +542,7 @@ async def generate_tabletop_document(data):
                     f'```json\n{json.dumps(log_entry, indent=2)}\n```'
                 )
 
-        return markdown
+        return {"markdown": markdown, "json": json_data}
     except Exception as e:
         logger.error(f"Error generating document: {e}")
         return f"Error generating document: {e}"
