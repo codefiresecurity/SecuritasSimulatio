@@ -345,6 +345,7 @@ async def generate_tabletop_document(data):
             return f"Error generating document: {response}"
 
         markdown = response
+        logger.info(f"Raw Markdown:\n{markdown}")  # Log raw Markdown for debugging
 
         # Initialize JSON structure
         json_data = {
@@ -367,15 +368,32 @@ async def generate_tabletop_document(data):
         current_inject = None
         in_log_block = False
         log_lines = []
+        narrative_lines = []
+        facilitation_lines = []
 
         for line in lines:
             line = line.strip()
-            if line.startswith('# Narrative'):
+            if not line:
+                continue  # Skip empty lines
+
+            # Detect section headers
+            if line.lower().startswith('# narrative'):
                 current_section = 'narrative'
-                json_data['narrative'] = []
                 continue
-            elif line.startswith('# Inject'):
+            elif line.lower().startswith('# inject'):
                 current_section = 'injects'
+                if current_inject:
+                    # Finalize previous inject
+                    current_inject['description'] = '\n'.join(current_inject['description']).strip()
+                    current_inject['objective'] = '\n'.join(current_inject['objective']).strip()
+                    if not current_inject['log_entry']:
+                        current_inject['log_entry'] = {
+                            "timestamp": (datetime.datetime.fromisoformat(base_time[:-1]) + 
+                                         datetime.timedelta(minutes=5*(len(json_data['injects'])))).isoformat() + "Z",
+                            "event": f"Activity for {current_inject['title']}",
+                            "source": "unknown",
+                            "details": "Generated as no log entry was provided"
+                        }
                 current_inject = {
                     "title": line,
                     "description": [],
@@ -384,9 +402,8 @@ async def generate_tabletop_document(data):
                 }
                 json_data['injects'].append(current_inject)
                 continue
-            elif line.startswith('# Facilitation Tips'):
+            elif line.lower().startswith('# facilitation tips'):
                 current_section = 'facilitation_tips'
-                json_data['facilitation_tips'] = []
                 continue
             elif line == '```json':
                 in_log_block = True
@@ -395,10 +412,11 @@ async def generate_tabletop_document(data):
             elif line == '```' and in_log_block:
                 in_log_block = False
                 if current_inject:
-                    log_content = '\n'.join(log_lines)
+                    log_content = '\n'.join(log_lines).strip()
                     try:
                         current_inject['log_entry'] = json.loads(log_content)
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Invalid JSON log entry for {current_inject['title']}: {e}")
                         current_inject['log_entry'] = {
                             "timestamp": (datetime.datetime.fromisoformat(base_time[:-1]) + 
                                          datetime.timedelta(minutes=5*(len(json_data['injects'])))).isoformat() + "Z",
@@ -408,34 +426,35 @@ async def generate_tabletop_document(data):
                         }
                 continue
 
+            # Assign content to sections
             if in_log_block:
                 log_lines.append(line)
-            elif line and current_section:
-                if current_section == 'narrative':
-                    json_data['narrative'].append(line)
-                elif current_section == 'facilitation_tips':
-                    json_data['facilitation_tips'].append(line)
-                elif current_section == 'injects' and current_inject:
-                    if line.startswith('**Objective**:'):
-                        current_inject['objective'].append(line.replace('**Objective**: ', ''))
-                    else:
-                        current_inject['description'].append(line)
+            elif current_section == 'narrative':
+                narrative_lines.append(line)
+            elif current_section == 'facilitation_tips':
+                facilitation_lines.append(line)
+            elif current_section == 'injects' and current_inject:
+                if line.lower().startswith('**objective**:'):
+                    current_inject['objective'].append(line.replace('**Objective**: ', '', 1).strip())
+                else:
+                    current_inject['description'].append(line)
 
-        # Convert lists to strings for cleaner JSON
-        json_data['narrative'] = '\n'.join(json_data['narrative']).strip()
-        json_data['facilitation_tips'] = '\n'.join(json_data['facilitation_tips']).strip()
-        for inject in json_data['injects']:
-            inject['description'] = '\n'.join(inject['description']).strip()
-            inject['objective'] = '\n'.join(inject['objective']).strip()
-            if not inject['log_entry']:
-                # Ensure every inject has a log entry
-                inject['log_entry'] = {
+        # Finalize any pending inject
+        if current_inject:
+            current_inject['description'] = '\n'.join(current_inject['description']).strip()
+            current_inject['objective'] = '\n'.join(current_inject['objective']).strip()
+            if not current_inject['log_entry']:
+                current_inject['log_entry'] = {
                     "timestamp": (datetime.datetime.fromisoformat(base_time[:-1]) + 
-                                 datetime.timedelta(minutes=5*(json_data['injects'].index(inject)+1))).isoformat() + "Z",
-                    "event": f"Activity for {inject['title']}",
+                                 datetime.timedelta(minutes=5*(len(json_data['injects'])))).isoformat() + "Z",
+                    "event": f"Activity for {current_inject['title']}",
                     "source": "unknown",
                     "details": "Generated as no log entry was provided"
                 }
+
+        # Assign collected lines to JSON
+        json_data['narrative'] = '\n'.join(narrative_lines).strip()
+        json_data['facilitation_tips'] = '\n'.join(facilitation_lines).strip()
 
         # Validate and fix JSON blocks in Markdown
         json_blocks = re.findall(r'```json\n(.*?)\n```', markdown, re.DOTALL)
@@ -456,6 +475,7 @@ async def generate_tabletop_document(data):
                     f'```json\n{json.dumps(log_entry, indent=2)}\n```'
                 )
 
+        logger.info(f"Parsed JSON data:\n{json.dumps(json_data, indent=2)}")  # Log parsed JSON for debugging
         return {"markdown": markdown, "json": json_data}
     except Exception as e:
         logger.error(f"Error generating document: {e}")
