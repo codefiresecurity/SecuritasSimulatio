@@ -531,7 +531,7 @@ def register():
                 conn.close()
                 return render_template('register.html', error="Username already exists.")
             
-            password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
+            password_hash = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
             cursor.execute(
                 "INSERT INTO users (username, password_hash) VALUES (%s, %s)",
                 (username, password_hash)
@@ -555,6 +555,9 @@ def login():
         username = request.form.get('username')
         password = request.form.get('password')
         
+        if not username or not password:
+            return render_template('login.html', error="Username and password are required.")
+        
         try:
             conn = connect_to_db()
             cursor = conn.cursor(dictionary=True)
@@ -562,7 +565,7 @@ def login():
             user = cursor.fetchone()
             conn.close()
             
-            if user and bcrypt.checkpw(password.encode('utf-8'), user['password_hash']):
+            if user and bcrypt.checkpw(password.encode('utf-8'), user['password_hash'].encode('utf-8')):
                 user_obj = User(user['id'], user['username'])
                 login_user(user_obj)
                 return redirect(url_for('index'))
