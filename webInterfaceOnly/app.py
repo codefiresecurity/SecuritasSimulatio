@@ -17,7 +17,7 @@ import bcrypt
 import re
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
@@ -317,34 +317,49 @@ async def generate_tabletop_document(data):
 
         ttps_str = ', '.join(data['ttps']) if data['ttps'] else 'None'
         prompt = f"""
-        Generate a tabletop exercise document in Markdown format based on the following details:
-        - **Day and Time**: {data['day_time']}
-        - **Basis**: {data['basis_id']} ({data['basis_type']})
-        - **Technologies**: {', '.join(data['technologies'])}
-        - **Number of Injects**: {data['num_injects']}
-        - **TTPs**: {ttps_str}
+Generate a tabletop exercise document in Markdown format with the EXACT structure below, based on these details:
+- **Day and Time**: {data['day_time']}
+- **Basis**: {data['basis_id']} ({data['basis_type']})
+- **Technologies**: {', '.join(data['technologies'])}
+- **Number of Injects**: {data['num_injects']}
+- **TTPs**: {ttps_str}
 
-        The document must include:
-        1. A **Narrative** section describing the scenario context (e.g., based on the basis and technologies).
-        2. Exactly **{data['num_injects']} Injects**, each with:
-           - A unique title (e.g., "Inject 1: Initial Compromise").
-           - A description of the event, aligned with the TTPs (if provided) or basis/technologies.
-           - An objective for the participants (e.g., "Identify the suspicious activity").
-           - A **Log Evidence** section containing one unique JSON-formatted log entry, enclosed in ```json ``` code blocks.
-             - The log should reflect the inject’s event (e.g., for T1059, include a command execution log).
-             - Include fields like `timestamp` (start from {base_time}, increment by 5 minutes per inject), `event`, and context-specific fields (e.g., `source_ip`, `command`, `port`).
-             - Tailor logs to technologies (e.g., AWS CloudTrail format for AWS, syslog for Cisco).
-             - Do NOT reference external files like 'logfile_sample.txt'.
-        3. A **Facilitation Tips** section with guidance for running the exercise.
+Use this precise structure, with no deviations:
+# Narrative
+[Provide a detailed scenario context, at least 3 sentences, describing the environment and threat based on the basis and technologies.]
 
-        Ensure each JSON log is unique, realistic, and relevant to the inject’s scenario.
-        """
+{"".join(f"""
+# Inject {i}: [Unique Title]
+[Describe the event, 2-3 sentences, aligned with the TTPs or basis/technologies.]
+**Objective**: [One sentence stating the participant objective, e.g., "Detect the suspicious activity."]
+**Log Evidence**
+```json
+{{
+  "timestamp": "[ISO timestamp, starting at {base_time}, increment by 5 minutes per inject]",
+  "event": "[Brief event description, matching the inject]",
+  "source": "[Relevant source, e.g., IP, user, or system]",
+  "details": "[Context-specific details, e.g., command executed or file accessed]"
+}}
+```""" for i in range(1, data['num_injects'] + 1))}
+
+# Facilitation Tips
+[Provide guidance for running the exercise, at least 3 sentences, including tips for facilitators.]
+
+Rules:
+- Use the exact headings: "# Narrative", "# Inject N", "# Facilitation Tips".
+- Each inject must have a title, description, objective, and a valid JSON log entry in a ```json``` block under **Log Evidence**.
+- JSON logs must be valid, unique, tailored to the technologies (e.g., Fortinet syslog format), and reflect the inject’s event.
+- Do not omit any section or inject.
+- Do not reference external files or use placeholders like "[Insert log here]".
+- Ensure content is realistic and relevant to the basis and TTPs.
+"""
+        logger.info(f"Sending prompt to Ollama:\n{prompt}")  # Log prompt for debugging
         response = await query_ollama(prompt)
         if response.startswith("Error") or response.startswith("Failed"):
             logger.error(f"Ollama query failed: {response}")
             return f"Error generating document: {response}"
 
-        markdown = response
+        markdown = response.strip()
         logger.info(f"Raw Markdown:\n{markdown}")  # Log raw Markdown for debugging
 
         # Initialize JSON structure
@@ -371,14 +386,16 @@ async def generate_tabletop_document(data):
         narrative_lines = []
         facilitation_lines = []
 
-        for line in lines:
+        for i, line in enumerate(lines):
             line = line.strip()
             if not line:
                 continue  # Skip empty lines
+            logger.debug(f"Parsing line {i+1}: {line}")  # Log each line for tracing
 
             # Detect section headers
             if line.lower().startswith('# narrative'):
                 current_section = 'narrative'
+                logger.debug("Entered narrative section")
                 continue
             elif line.lower().startswith('# inject'):
                 current_section = 'injects'
@@ -394,6 +411,7 @@ async def generate_tabletop_document(data):
                             "source": "unknown",
                             "details": "Generated as no log entry was provided"
                         }
+                    logger.debug(f"Finalized inject: {current_inject['title']}")
                 current_inject = {
                     "title": line,
                     "description": [],
@@ -401,13 +419,16 @@ async def generate_tabletop_document(data):
                     "log_entry": None
                 }
                 json_data['injects'].append(current_inject)
+                logger.debug(f"Started new inject: {line}")
                 continue
             elif line.lower().startswith('# facilitation tips'):
                 current_section = 'facilitation_tips'
+                logger.debug("Entered facilitation tips section")
                 continue
             elif line == '```json':
                 in_log_block = True
                 log_lines = []
+                logger.debug("Entered JSON log block")
                 continue
             elif line == '```' and in_log_block:
                 in_log_block = False
@@ -415,6 +436,7 @@ async def generate_tabletop_document(data):
                     log_content = '\n'.join(log_lines).strip()
                     try:
                         current_inject['log_entry'] = json.loads(log_content)
+                        logger.debug(f"Parsed log entry for {current_inject['title']}: {log_content}")
                     except json.JSONDecodeError as e:
                         logger.warning(f"Invalid JSON log entry for {current_inject['title']}: {e}")
                         current_inject['log_entry'] = {
@@ -436,8 +458,12 @@ async def generate_tabletop_document(data):
             elif current_section == 'injects' and current_inject:
                 if line.lower().startswith('**objective**:'):
                     current_inject['objective'].append(line.replace('**Objective**: ', '', 1).strip())
+                    logger.debug(f"Added objective: {line}")
+                elif line.lower().startswith('**log evidence**'):
+                    continue  # Skip Log Evidence heading
                 else:
                     current_inject['description'].append(line)
+                    logger.debug(f"Added description line: {line}")
 
         # Finalize any pending inject
         if current_inject:
@@ -451,10 +477,35 @@ async def generate_tabletop_document(data):
                     "source": "unknown",
                     "details": "Generated as no log entry was provided"
                 }
+                logger.debug(f"Added fallback log entry for {current_inject['title']}")
 
         # Assign collected lines to JSON
         json_data['narrative'] = '\n'.join(narrative_lines).strip()
         json_data['facilitation_tips'] = '\n'.join(facilitation_lines).strip()
+
+        # Fallback if sections are empty
+        if not json_data['narrative']:
+            json_data['narrative'] = f"A threat actor ({data['basis_id']}) targets the {', '.join(data['technologies'])} environment on {data['day_time']}."
+            logger.warning("No narrative found; added fallback")
+        if not json_data['injects']:
+            for i in range(1, data['num_injects'] + 1):
+                inject = {
+                    "title": f"# Inject {i}: Placeholder Incident",
+                    "description": f"Simulated incident {i} affecting {', '.join(data['technologies'])}.",
+                    "objective": "Analyze the incident and propose mitigation.",
+                    "log_entry": {
+                        "timestamp": (datetime.datetime.fromisoformat(base_time[:-1]) + 
+                                     datetime.timedelta(minutes=5*i)).isoformat() + "Z",
+                        "event": f"Placeholder event for inject {i}",
+                        "source": "unknown",
+                        "details": "Generated as no inject content was provided"
+                    }
+                }
+                json_data['injects'].append(inject)
+            logger.warning(f"No injects found; added {data['num_injects']} placeholder injects")
+        if not json_data['facilitation_tips']:
+            json_data['facilitation_tips'] = "Encourage team discussion, ensure all participants contribute, and review logs carefully."
+            logger.warning("No facilitation tips found; added fallback")
 
         # Validate and fix JSON blocks in Markdown
         json_blocks = re.findall(r'```json\n(.*?)\n```', markdown, re.DOTALL)
@@ -475,7 +526,7 @@ async def generate_tabletop_document(data):
                     f'```json\n{json.dumps(log_entry, indent=2)}\n```'
                 )
 
-        logger.info(f"Parsed JSON data:\n{json.dumps(json_data, indent=2)}")  # Log parsed JSON for debugging
+        logger.info(f"Parsed JSON data:\n{json.dumps(json_data, indent=2)}")  # Log parsed JSON
         return {"markdown": markdown, "json": json_data}
     except Exception as e:
         logger.error(f"Error generating document: {e}")
