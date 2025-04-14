@@ -851,6 +851,11 @@ def send_message():
     
     return jsonify({'response': response})
 
+@app.route('/run-tabletop')
+@login_required
+def run_tabletop():
+    return render_template('run_tabletop.html')
+
 @app.route('/clear', methods=['POST'])
 @login_required
 def clear_conversation():
