@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MITRE ATT&CK Query Tool</title>
+    <title>SecuritasSimulato</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
     <div class="container">
         <!-- Left: Chat Area -->
         <div class="chat-area">
-            <h1>MITRE ATT&CK Query Tool</h1>
+            <h1>SecuritasSimulato</h1>
             <div class="conversation" id="chat-box">
                 {% for msg in session.get('conversation', []) %}
                     <div class="message {{ msg.sender }}">
