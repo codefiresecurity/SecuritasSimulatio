@@ -251,7 +251,7 @@ def search_campaigns(query: str) -> Optional[List[Dict[str, any]]]:
             query_sql = """
                 SELECT c.id AS attack_id, c.name, c.description, cer.external_id AS campaign_id
                 FROM campaigns c
-                LEFT JOIN campaign_external_references cer ON c.id = cer.campaign_id AND er.source_name = 'mitre-attack'
+                LEFT JOIN campaign_external_references cer ON c.id = cer.campaign_id AND cer.source_name = 'mitre-attack'
                 WHERE c.name LIKE %s
             """
             cursor.execute(query_sql, (f"%{query}%",))
@@ -364,3 +364,57 @@ def get_group_ttps(queries: List[str]) -> Dict[str, any]:
     except Exception as e:
         logger.error(f"Error fetching group TTPs: {e}")
         return {"error": f"Error fetching group TTPs: {str(e)}"}
+    
+def fetch_mitre_details(identifier: str) -> Dict[str, any]:
+    """Fetch details for a MITRE ATT&CK group, software, campaign, or generic term."""
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor(dictionary=True)
+
+        # Check if identifier is a group
+        if validate_group_id(identifier):
+            cursor.execute("""
+                SELECT g.id AS attack_id, g.name, g.description, er.external_id AS group_id
+                FROM groups g
+                JOIN group_external_references er ON g.id = er.group_id
+                WHERE er.source_name = 'mitre-attack' AND er.external_id = %s
+            """, (identifier,))
+            group = cursor.fetchone()
+            if group:
+                conn.close()
+                return {'type': 'group', 'details': group}
+
+        # Check if identifier is a software
+        if validate_id(identifier, 'S'):
+            cursor.execute("""
+                SELECT s.id AS attack_id, s.name, s.description, s.software_type, ser.external_id AS software_id
+                FROM software s
+                JOIN software_external_references ser ON s.id = ser.software_id
+                WHERE ser.source_name = 'mitre-attack' AND ser.external_id = %s
+            """, (identifier,))
+            software = cursor.fetchone()
+            if software:
+                conn.close()
+                return {'type': 'software', 'details': software}
+
+        # Check if identifier is a campaign
+        if validate_id(identifier, 'C'):
+            cursor.execute("""
+                SELECT c.id AS attack_id, c.name, c.description, cer.external_id AS campaign_id
+                FROM campaigns c
+                JOIN campaign_external_references cer ON c.id = cer.campaign_id
+                WHERE cer.source_name = 'mitre-attack' AND cer.external_id = %s
+            """, (identifier,))
+            campaign = cursor.fetchone()
+            if campaign:
+                conn.close()
+                return {'type': 'campaign', 'details': campaign}
+
+        # If not found, treat as generic term
+        conn.close()
+        return {'type': 'generic', 'details': {'name': identifier}}
+
+    except mysql.connector.Error as e:
+        logger.error(f"Database error: {e}")
+        conn.close()
+        return {'type': 'error', 'details': f"Database error: {e}"}
