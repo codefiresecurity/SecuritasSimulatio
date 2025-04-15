@@ -3,15 +3,133 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Run Tabletop Exercise</title>
+    <title>Run Tabletop Exercise - Securitas Simulatio</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Tabletop Exercise Environment</h1>
-        <p>This is a placeholder for the tabletop exercise runtime environment.</p>
-        <p>Functionality will be added later.</p>
-        <a href="/home">Return to Home</a>
+    <div class="tabletop-container">
+        {% if tabletop %}
+            <div class="tabletop-main">
+                <!-- Left: Narrative (25%) -->
+                <div class="narrative-panel">
+                    <h2>Narrative</h2>
+                    <p>{{ tabletop.narrative | safe }}</p>
+                </div>
+                <!-- Middle: Current Inject (50%) -->
+                <div class="inject-panel">
+                    <h2>Inject <span id="inject-number">1</span> of {{ tabletop.num_injects }}</h2>
+                    <div id="inject-content">
+                        <h3>{{ tabletop.injects[0].title | safe }}</h3>
+                        <p>{{ tabletop.injects[0].description | safe }}</p>
+                        <p><strong>Objective:</strong> {{ tabletop.injects[0].objective | safe }}</p>
+                        <pre>{{ tabletop.injects[0].log_entry | tojson | safe }}</pre>
+                    </div>
+                    <div class="inject-controls">
+                        <button id="prev-inject" disabled>Previous</button>
+                        <button id="next-inject" {% if tabletop.num_injects == 1 %}disabled{% endif %}>Next</button>
+                    </div>
+                </div>
+                <!-- Right: Notes (25%) -->
+                <div class="notes-panel">
+                    <h2>Notes</h2>
+                    <div class="notes-list" id="notes-list">
+                        <!-- Notes will be appended here -->
+                    </div>
+                    <div class="notes-input">
+                        <form id="notes-form">
+                            <input type="text" id="note-input" placeholder="Enter note..." autocomplete="off">
+                            <button type="submit">Submit</button>
+                            <button type="button" id="export-notes">Export</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            <!-- Bottom: Facilitation Tips -->
+            <div class="facilitation-panel">
+                <h2>Facilitation Tips</h2>
+                <p>{{ tabletop.facilitation_tips | safe }}</p>
+            </div>
+        {% else %}
+            <h1>No Tabletop Selected</h1>
+            <p>Please select a tabletop exercise to run.</p>
+            <h2>Available Tabletop Exercises</h2>
+            {% if tabletops %}
+                <ul>
+                    {% for tt in tabletops %}
+                        <li><a href="/run_tabletop/{{ tt.id }}">{{ tt.filename }}</a></li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p>No tabletop exercises available. Create one using the <code>create tabletop</code> command.</p>
+            {% endif %}
+            <a href="/">Return to Home</a>
+        {% endif %}
     </div>
+    {% if tabletop %}
+    <script>
+        const injects = {{ tabletop.injects | tojson | safe }};
+        const tabletopId = {{ tabletop.id | tojson | safe }};
+        let currentInject = 0;
+
+        // Update inject content
+        function updateInject(index) {
+            const inject = injects[index];
+            document.getElementById('inject-number').textContent = index + 1;
+            document.getElementById('inject-content').innerHTML = `
+                <h3>${inject.title}</h3>
+                <p>${inject.description}</p>
+                <p><strong>Objective:</strong> ${inject.objective}</p>
+                <pre>${JSON.stringify(inject.log_entry, null, 2)}</pre>
+            `;
+            document.getElementById('prev-inject').disabled = index === 0;
+            document.getElementById('next-inject').disabled = index === injects.length - 1;
+            currentInject = index;
+        }
+
+        // Inject navigation
+        document.getElementById('next-inject').addEventListener('click', () => {
+            if (currentInject < injects.length - 1) {
+                updateInject(currentInject + 1);
+            }
+        });
+
+        document.getElementById('prev-inject').addEventListener('click', () => {
+            if (currentInject > 0) {
+                updateInject(currentInject - 1);
+            }
+        });
+
+        // Notes submission
+        document.getElementById('notes-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const noteInput = document.getElementById('note-input');
+            const note = noteInput.value.trim();
+            if (!note) return;
+
+            const response = await fetch('/tabletop_note', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `tabletop_id=${encodeURIComponent(tabletopId)}&note=${encodeURIComponent(note)}`
+            });
+            const data = await response.json();
+            if (data.status === 'success') {
+                const notesList = document.getElementById('notes-list');
+                const noteDiv = document.createElement('div');
+                noteDiv.className = 'note';
+                noteDiv.textContent = note;
+                notesList.appendChild(noteDiv);
+                notesList.scrollTop = notesList.scrollHeight;
+                noteInput.value = '';
+            } else {
+                alert('Failed to save note: ' + data.message);
+            }
+        });
+
+        // Export notes
+        document.getElementById('export-notes').addEventListener('click', () => {
+            window.location.href = `/export_notes/${tabletopId}`;
+        });
+    </script>
+    {% endif %}
 </body>
 </html>

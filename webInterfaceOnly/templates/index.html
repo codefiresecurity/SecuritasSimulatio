@@ -58,11 +58,11 @@
             <p>Use these commands to interact with MITRE ATT&CK data or create tabletop exercises.</p>
             <ul class="command-list">
                 <li>
-                    <span class="command">create tabletop</span>
+                    <span class="command">create-tabletop</span>
                     <span class="description">Design a new tabletop exercise.</span>
                 </li>
                 <li>
-                    <span class="command">run tabletop</span>
+                    <span class="command">run-tabletop</span>
                     <span class="description">Run a tabletop exercise in a new tab.</span>
                 </li>
                 <li>
@@ -122,7 +122,7 @@
             if (!message) return;
 
             // Handle 'run tabletop' command
-            if (message === 'run tabletop') {
+            if (message === 'run-tabletop') {
                 window.open('/run_tabletop', '_blank');
                 userInput.value = '';
                 return;

@@ -817,7 +817,7 @@ def send_message():
         return jsonify({'response': 'Please enter a message.'})
 
     # Handle 'run tabletop' command (client-side redirect, no server response needed)
-    if user_input == 'run tabletop':
+    if user_input == 'run-tabletop':
         return jsonify({'response': 'Opening tabletop exercise in a new tab.'})
 
     save_conversation(current_user.id, 'user', user_input)
@@ -856,10 +856,119 @@ def send_message():
     return jsonify({'response': response})
 
 @app.route('/run_tabletop')
+@app.route('/run_tabletop/<int:tabletop_id>')
 @login_required
-def run_tabletop():
+def run_tabletop(tabletop_id=None):
     """Render the tabletop exercise runtime environment."""
-    return render_template('run_tabletop.html')
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT id, filename, json_data FROM tabletops WHERE user_id = %s ORDER BY created_at DESC",
+            (current_user.id,)
+        )
+        tabletops = cursor.fetchall()
+        
+        if tabletop_id:
+            cursor.execute(
+                "SELECT id, filename, json_data FROM tabletops WHERE id = %s AND user_id = %s",
+                (tabletop_id, current_user.id)
+            )
+            tabletop = cursor.fetchone()
+            if tabletop:
+                tabletop_data = json.loads(tabletop['json_data'])
+                tabletop_data['id'] = tabletop['id']
+                conn.close()
+                return render_template('run_tabletop.html', tabletop=tabletop_data, tabletops=tabletops)
+            else:
+                conn.close()
+                return render_template('run_tabletop.html', tabletops=tabletops, error="Tabletop not found or not authorized.")
+        
+        conn.close()
+        return render_template('run_tabletop.html', tabletops=tabletops)
+    except Exception as e:
+        logger.error(f"Error loading tabletop: {e}")
+        return render_template('run_tabletop.html', error="Failed to load tabletops.")
+
+@app.route('/tabletop_note', methods=['POST'])
+@login_required
+def save_tabletop_note():
+    """Save a note for a completed tabletop exercise."""
+    tabletop_id = request.form.get('tabletop_id')
+    note = request.form.get('note')
+    if not tabletop_id or not note:
+        return jsonify({'status': 'error', 'message': 'Tabletop ID and note are required.'})
+    
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT id FROM tabletops WHERE id = %s AND user_id = %s",
+            (tabletop_id, current_user.id)
+        )
+        tabletop = cursor.fetchone()
+        if not tabletop:
+            conn.close()
+            return jsonify({'status': 'error', 'message': 'Tabletop not found or not authorized.'})
+        
+        cursor.execute(
+            "SELECT id, notes FROM completed_tabletops WHERE tabletop_id = %s AND user_id = %s",
+            (tabletop_id, current_user.id)
+        )
+        completed = cursor.fetchone()
+        if completed:
+            notes = json.loads(completed['notes']) if completed['notes'] else []
+            notes.append({'note': note, 'timestamp': datetime.utcnow().isoformat()})
+            cursor.execute(
+                "UPDATE completed_tabletops SET notes = %s WHERE id = %s",
+                (json.dumps(notes), completed['id'])
+            )
+        else:
+            notes = [{'note': note, 'timestamp': datetime.utcnow().isoformat()}]
+            cursor.execute(
+                "INSERT INTO completed_tabletops (user_id, tabletop_id, notes) VALUES (%s, %s, %s)",
+                (current_user.id, tabletop_id, json.dumps(notes))
+            )
+        conn.commit()
+        conn.close()
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        logger.error(f"Error saving note: {e}")
+        return jsonify({'status': 'error', 'message': 'Failed to save note.'})
+
+@app.route('/export_notes/<int:tabletop_id>')
+@login_required
+def export_notes(tabletop_id):
+    """Export notes for a completed tabletop as a text file."""
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT notes FROM completed_tabletops WHERE tabletop_id = %s AND user_id = %s",
+            (tabletop_id, current_user.id)
+        )
+        completed = cursor.fetchone()
+        conn.close()
+        
+        if not completed or not completed['notes']:
+            return "No notes available for this tabletop.", 404
+        
+        notes = json.loads(completed['notes'])
+        notes_text = "\n".join([f"[{n['timestamp']}] {n['note']}" for n in notes])
+        
+        buffer = io.BytesIO()
+        buffer.write(notes_text.encode('utf-8'))
+        buffer.seek(0)
+        
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name=f'tabletop_{tabletop_id}_notes.txt',
+            mimetype='text/plain'
+        )
+    except Exception as e:
+        logger.error(f"Error exporting notes: {e}")
+        return "Failed to export notes.", 500
 
 @app.route('/clear', methods=['POST'])
 @login_required
