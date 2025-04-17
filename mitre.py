@@ -42,6 +42,8 @@ def validate_ttp_id(ttp_id: str) -> bool:
 
 def get_technique_details(ttp_id: str) -> Optional[Dict[str, any]]:
     """Query the database for a technique's description and related TTPs by TTP ID."""
+    ttp_id = ttp_id.strip().upper()
+    
     if not validate_ttp_id(ttp_id):
         logger.warning(f"Invalid TTP ID format: {ttp_id}. Must be T#### or T####.###")
         return None
@@ -134,6 +136,7 @@ def search_by_name_or_description(search_term: str) -> List[Dict[str, str]]:
 def validate_group_id(group_id: str) -> bool:
     """Validate that the group ID matches the format G####"""
     pattern = r'^G\d{4}$'
+    group_id = group_id.strip().upper()
     return bool(re.match(pattern, group_id))
 
 def search_groups(query: str) -> Optional[List[Dict[str, any]]]:
@@ -147,16 +150,15 @@ def search_groups(query: str) -> Optional[List[Dict[str, any]]]:
             query_sql = """
                 SELECT g.id AS attack_id, g.name, g.description, er.external_id AS group_id
                 FROM groups g
-                JOIN external_references er ON g.id = er.technique_id
-                WHERE er.source_name = 'mitre-attack'
-                AND er.external_id = %s
+                LEFT JOIN group_external_references er ON g.id = er.group_id
+                WHERE er.source_name = 'mitre-attack' AND er.external_id = %s
             """
             cursor.execute(query_sql, (query,))
         else:
             query_sql = """
                 SELECT g.id AS attack_id, g.name, g.description, er.external_id AS group_id
                 FROM groups g
-                LEFT JOIN external_references er ON g.id = er.technique_id AND er.source_name = 'mitre-attack'
+                LEFT JOIN group_external_references er ON g.id = er.group_id
                 WHERE g.name LIKE %s
             """
             cursor.execute(query_sql, (f"%{query}%",))
@@ -195,6 +197,8 @@ def search_groups(query: str) -> Optional[List[Dict[str, any]]]:
 
 def validate_id(attck_id: str, prefix: str) -> bool:
     """Validate that the ID matches the format S#### or C####"""
+    
+    attck_id = attck_id.strip().upper() 
     pattern = rf'^{prefix}\d{{4}}$'
     return bool(re.match(pattern, attck_id))
 
@@ -251,7 +255,7 @@ def search_campaigns(query: str) -> Optional[List[Dict[str, any]]]:
             query_sql = """
                 SELECT c.id AS attack_id, c.name, c.description, cer.external_id AS campaign_id
                 FROM campaigns c
-                LEFT JOIN campaign_external_references cer ON c.id = cer.campaign_id AND er.source_name = 'mitre-attack'
+                LEFT JOIN campaign_external_references cer ON c.id = cer.campaign_id AND cer.source_name = 'mitre-attack'
                 WHERE c.name LIKE %s
             """
             cursor.execute(query_sql, (f"%{query}%",))
@@ -265,7 +269,7 @@ def search_campaigns(query: str) -> Optional[List[Dict[str, any]]]:
         return None
 
 def recommend_log_sources(ttps: List[str]) -> Dict[str, any]:
-    """Recommend log sources for a list of TTPs, with coverage and blind spots."""
+    """Recommend log sources for a list of TTPs, with coverage, blind spots, and individual query analysis."""
     try:
         conn = connect_to_db()
         cursor = conn.cursor(dictionary=True)
@@ -273,6 +277,8 @@ def recommend_log_sources(ttps: List[str]) -> Dict[str, any]:
         # Track log sources and their covered TTPs
         log_sources = {}
         covered_ttps = set()
+        # Track coverage per query item
+        query_coverage = {ttp: {'covered': False, 'sources': set()} for ttp in ttps}
 
         for ttp in ttps:
             cursor.execute("""
@@ -284,6 +290,7 @@ def recommend_log_sources(ttps: List[str]) -> Dict[str, any]:
             
             if sources:
                 covered_ttps.add(ttp)
+                query_coverage[ttp]['covered'] = True
                 for source in sources:
                     source_name = source['name']
                     if source_name not in log_sources:
@@ -293,16 +300,22 @@ def recommend_log_sources(ttps: List[str]) -> Dict[str, any]:
                             "covered_ttps": set()
                         }
                     log_sources[source_name]["covered_ttps"].add(ttp)
+                    query_coverage[ttp]['sources'].add(source_name)
 
         conn.close()
 
         # Calculate blind spots (TTPs with no log sources)
         blind_spots = [ttp for ttp in ttps if ttp not in covered_ttps]
 
-        # Calculate coverage percentage
+        # Calculate total coverage percentage
         total_ttps = len(ttps)
         covered_count = len(covered_ttps)
-        coverage_percentage = (covered_count / total_ttps * 100) if total_ttps > 0 else 0
+        total_coverage_percentage = (covered_count / total_ttps * 100) if total_ttps > 0 else 0
+
+        # Calculate individual coverage percentages
+        individual_coverage = {}
+        for ttp in ttps:
+            individual_coverage[ttp] = 100.0 if query_coverage[ttp]['covered'] else 0.0
 
         # Convert sets to lists for serialization
         for source in log_sources.values():
@@ -311,9 +324,10 @@ def recommend_log_sources(ttps: List[str]) -> Dict[str, any]:
         return {
             "log_sources": log_sources,
             "blind_spots": blind_spots,
-            "coverage_percentage": coverage_percentage,
+            "total_coverage_percentage": total_coverage_percentage,
             "total_ttps": total_ttps,
-            "covered_ttps": covered_count
+            "covered_ttps": covered_count,
+            "individual_coverage": individual_coverage  # New field for per-query coverage
         }
     except mysql.connector.Error as e:
         logger.error(f"Database error in recommend_log_sources: {e}")
@@ -354,3 +368,70 @@ def get_group_ttps(queries: List[str]) -> Dict[str, any]:
     except Exception as e:
         logger.error(f"Error fetching group TTPs: {e}")
         return {"error": f"Error fetching group TTPs: {str(e)}"}
+    
+def fetch_mitre_details(identifier: str) -> Dict[str, any]:
+    """Fetch details for a MITRE ATT&CK group, software, campaign, or generic term."""
+    try:
+        conn = connect_to_db()
+        cursor = conn.cursor(dictionary=True)
+
+        # Check if identifier is a group
+        if validate_group_id(identifier):
+            logger.info(f"Searching for group with ID: {identifier}")
+            cursor.execute("""
+                SELECT g.id AS attack_id, g.name, g.description, er.external_id AS group_id
+                FROM groups g
+                LEFT JOIN group_external_references er ON g.id = er.group_id
+                WHERE er.source_name = 'mitre-attack' AND er.external_id = %s
+            """, (identifier,))
+            group = cursor.fetchone()
+            if group:
+                logger.info(f"Found group: {group}")
+                conn.close()
+                return {'type': 'group', 'details': group}
+            else:
+                logger.warning(f"No group found for ID: {identifier}")
+
+        # Check if identifier is a software
+        if validate_id(identifier, 'S'):
+            logger.info(f"Searching for software with ID: {identifier}")
+            cursor.execute("""
+                SELECT s.id AS attack_id, s.name, s.description, s.software_type, ser.external_id AS software_id
+                FROM software s
+                LEFT JOIN software_external_references ser ON s.id = ser.software_id
+                WHERE ser.source_name = 'mitre-attack' AND ser.external_id = %s
+            """, (identifier,))
+            software = cursor.fetchone()
+            if software:
+                logger.info(f"Found software: {software}")
+                conn.close()
+                return {'type': 'software', 'details': software}
+            else:
+                logger.warning(f"No software found for ID: {identifier}")
+
+        # Check if identifier is a campaign
+        if validate_id(identifier, 'C'):
+            logger.info(f"Searching for campaign with ID: {identifier}")
+            cursor.execute("""
+                SELECT c.id AS attack_id, c.name, c.description, cer.external_id AS campaign_id
+                FROM campaigns c
+                LEFT JOIN campaign_external_references cer ON c.id = cer.campaign_id
+                WHERE cer.source_name = 'mitre-attack' AND cer.external_id = %s
+            """, (identifier,))
+            campaign = cursor.fetchone()
+            if campaign:
+                logger.info(f"Found campaign: {campaign}")
+                conn.close()
+                return {'type': 'campaign', 'details': campaign}
+            else:
+                logger.warning(f"No campaign found for ID: {identifier}")
+
+        # If not found, treat as generic term
+        conn.close()
+        logger.info(f"Treating identifier as generic term: {identifier}")
+        return {'type': 'generic', 'details': {'name': identifier}}
+
+    except mysql.connector.Error as e:
+        logger.error(f"Database error: {e}")
+        conn.close()
+        return {'type': 'error', 'details': f"Database error: {e}"}

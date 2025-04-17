@@ -9,6 +9,12 @@ import re
 import matplotlib.patches as mpatches  # Added for legend
 import os
 from dotenv import load_dotenv
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 load_dotenv()
 DB_HOST = os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")
@@ -28,70 +34,99 @@ def connect_to_db(
         database=database
     )
 
-# Validation functions
 def validate_id(query: str, prefix: str) -> bool:
     """Validate ATT&CK ID format (e.g., T####, S####, C####, G####)."""
     pattern = rf'^{prefix}\d{{4}}(\.\d{{3}})?$'
     return bool(re.match(pattern, query))
 
-# Fetch entity and relationships
-def fetch_linked_entities(query: str) -> Optional[tuple[Dict[str, str], List[tuple]]]:
-    """Fetch the focal entity and its linked entities from the database."""
+def fetch_linked_entities(query: str) -> tuple[Dict[str, any], List[tuple]]:
+    logger.info(f"Fetching entities for query: {query}")
     conn = connect_to_db()
     cursor = conn.cursor(dictionary=True)
 
-    # Determine entity type based on query format
+    is_uuid = re.match(r'^[a-z]+--[0-9a-f-]+$', query, re.I)
+    focal_entity = None
     entity_type = None
-    if validate_id(query, 'T'):
-        entity_type = 'technique'
-        table = 'techniques'
-        ref_table = 'external_references'
-        id_field = 'technique_id'
-    elif validate_id(query, 'G'):
-        entity_type = 'group'
-        table = 'groups'
-        ref_table = 'group_external_references'
-        id_field = 'group_id'
-    elif validate_id(query, 'S'):
-        entity_type = 'software'
-        table = 'software'
-        ref_table = 'software_external_references'
-        id_field = 'software_id'
-    elif validate_id(query, 'C'):
-        entity_type = 'campaign'
-        table = 'campaigns'
-        ref_table = 'campaign_external_references'
-        id_field = 'campaign_id'
+    table = None
+    ref_table = None
+    id_field = None
+
+    if is_uuid:
+        for _type, _table, _ref_table, _id_field in [
+            ('group', 'groups', 'group_external_references', 'group_id'),
+            ('technique', 'techniques', 'external_references', 'technique_id'),
+            ('software', 'software', 'software_external_references', 'software_id'),
+            ('campaign', 'campaigns', 'campaign_external_references', 'campaign_id')
+        ]:
+            cursor.execute(f"""
+                SELECT t.id AS attack_id, t.name, er.external_id AS attck_id
+                FROM {_table} t
+                LEFT JOIN {_ref_table} er ON t.id = er.{_id_field} AND er.source_name = 'mitre-attack'
+                WHERE t.id = %s
+            """, (query,))
+            focal_entity = cursor.fetchone()
+            if focal_entity:
+                logger.info(f"Found entity in {_table} for UUID: {query}")
+                entity_type = _type
+                table = _table
+                ref_table = _ref_table
+                id_field = _id_field
+                break
+            else:
+                logger.debug(f"No entity in {_table} for UUID: {query}")
     else:
-        # Assume group name if not an ID
-        entity_type = 'group'
-        table = 'groups'
-        ref_table = 'group_external_references'
-        id_field = 'group_id'
+        if validate_id(query, 'T'):
+            entity_type = 'technique'
+            table = 'techniques'
+            ref_table = 'external_references'
+            id_field = 'technique_id'
+        elif validate_id(query, 'G'):
+            entity_type = 'group'
+            table = 'groups'
+            ref_table = 'group_external_references'
+            id_field = 'group_id'
+        elif validate_id(query, 'S'):
+            entity_type = 'software'
+            table = 'software'
+            ref_table = 'software_external_references'
+            id_field = 'software_id'
+        elif validate_id(query, 'C'):
+            entity_type = 'campaign'
+            table = 'campaigns'
+            ref_table = 'campaign_external_references'
+            id_field = 'campaign_id'
+        else:
+            entity_type = 'group'
+            table = 'groups'
+            ref_table = 'group_external_references'
+            id_field = 'group_id'
 
-    # Fetch focal entity
-    if entity_type in ['technique', 'group', 'software', 'campaign'] and validate_id(query, entity_type[0].upper()):
-        query_sql = f"""
-            SELECT t.id AS attack_id, t.name, er.external_id AS attck_id
-            FROM {table} t
-            JOIN {ref_table} er ON t.id = er.{id_field}
-            WHERE er.source_name = 'mitre-attack'
-            AND er.external_id = %s
-        """
-        cursor.execute(query_sql, (query,))
-    else:  # Search by group name
-        query_sql = """
-            SELECT g.id AS attack_id, g.name, er.external_id AS attck_id
-            FROM groups g
-            LEFT JOIN group_external_references er ON g.id = er.group_id AND er.source_name = 'mitre-attack'
-            WHERE g.name LIKE %s
-        """
-        cursor.execute(query_sql, (f"%{query}%",))
+        if entity_type in ['technique', 'group', 'software', 'campaign'] and validate_id(query, entity_type[0].upper()):
+            query_sql = f"""
+                SELECT t.id AS attack_id, t.name, er.external_id AS attck_id
+                FROM {table} t
+                JOIN {ref_table} er ON t.id = er.{id_field}
+                WHERE er.source_name = 'mitre-attack'
+                AND er.external_id = %s
+            """
+            cursor.execute(query_sql, (query,))
+        else:
+            query_sql = """
+                SELECT g.id AS attack_id, g.name, er.external_id AS attck_id
+                FROM groups g
+                LEFT JOIN group_external_references er ON g.id = er.group_id AND er.source_name = 'mitre-attack'
+                WHERE g.name LIKE %s
+            """
+            cursor.execute(query_sql, (f"%{query}%",))
 
-    focal_entity = cursor.fetchone()
+        focal_entity = cursor.fetchone()
+        if focal_entity:
+            logger.info(f"Found entity for ATT&CK ID/name: {query}")
+
     if not focal_entity:
+        logger.warning(f"No focal entity found for query: {query}")
         conn.close()
-        return None
+        return {}, []
 
     entities = {focal_entity['attack_id']: {
         'name': focal_entity['name'],
@@ -99,7 +134,6 @@ def fetch_linked_entities(query: str) -> Optional[tuple[Dict[str, str], List[tup
         'type': entity_type
     }}
 
-    # Fetch all relationships involving the focal entity
     relationships = []
     cursor.execute("""
         SELECT source_id, target_id, relationship_type
@@ -109,12 +143,11 @@ def fetch_linked_entities(query: str) -> Optional[tuple[Dict[str, str], List[tup
     for rel in cursor.fetchall():
         relationships.append((rel['source_id'], rel['target_id'], rel['relationship_type']))
 
-    # Fetch all related entities
     related_ids = set()
     for src, tgt, _ in relationships:
         related_ids.add(src)
         related_ids.add(tgt)
-    related_ids.discard(focal_entity['attack_id'])  # Remove focal entity
+    related_ids.discard(focal_entity['attack_id'])
 
     for table, entity_type in [('techniques', 'technique'), ('groups', 'group'), ('software', 'software'), ('campaigns', 'campaign')]:
         if related_ids:
@@ -141,6 +174,7 @@ def fetch_linked_entities(query: str) -> Optional[tuple[Dict[str, str], List[tup
                 }
 
     conn.close()
+    logger.info(f"Found entities for {query}: {entities}")
     return entities, relationships
 
 def generate_graph(query: str) -> Optional[io.BytesIO]:
