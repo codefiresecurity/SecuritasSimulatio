@@ -42,6 +42,8 @@ def validate_ttp_id(ttp_id: str) -> bool:
 
 def get_technique_details(ttp_id: str) -> Optional[Dict[str, any]]:
     """Query the database for a technique's description and related TTPs by TTP ID."""
+    ttp_id = ttp_id.strip().upper()
+    
     if not validate_ttp_id(ttp_id):
         logger.warning(f"Invalid TTP ID format: {ttp_id}. Must be T#### or T####.###")
         return None
