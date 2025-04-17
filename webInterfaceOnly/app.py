@@ -918,13 +918,13 @@ def save_tabletop_note():
         completed = cursor.fetchone()
         if completed:
             notes = json.loads(completed['notes']) if completed['notes'] else []
-            notes.append({'note': note, 'timestamp': datetime.utcnow().isoformat()})
+            notes.append({'note': note, 'timestamp': datetime.datetime.utcnow().isoformat()})
             cursor.execute(
                 "UPDATE completed_tabletops SET notes = %s WHERE id = %s",
                 (json.dumps(notes), completed['id'])
             )
         else:
-            notes = [{'note': note, 'timestamp': datetime.utcnow().isoformat()}]
+            notes = [{'note': note, 'timestamp': datetime.datetime.utcnow().isoformat()}]
             cursor.execute(
                 "INSERT INTO completed_tabletops (user_id, tabletop_id, notes) VALUES (%s, %s, %s)",
                 (current_user.id, tabletop_id, json.dumps(notes))

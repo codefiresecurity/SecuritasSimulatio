@@ -13,7 +13,13 @@
                 <!-- Left: Narrative (25%) -->
                 <div class="narrative-panel">
                     <h2>Narrative</h2>
-                    <p>{{ tabletop.narrative | safe }}</p>
+                    <div class="narrative-content">
+                        {% for paragraph in tabletop.narrative.split('\n') %}
+                            {% if paragraph.strip() %}
+                                <p>{{ paragraph | safe }}</p>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
                 </div>
                 <!-- Middle: Current Inject (50%) -->
                 <div class="inject-panel">
@@ -47,22 +53,35 @@
             <!-- Bottom: Facilitation Tips -->
             <div class="facilitation-panel">
                 <h2>Facilitation Tips</h2>
-                <p>{{ tabletop.facilitation_tips | safe }}</p>
-            </div>
-        {% else %}
-            <h1>No Tabletop Selected</h1>
-            <p>Please select a tabletop exercise to run.</p>
-            <h2>Available Tabletop Exercises</h2>
-            {% if tabletops %}
                 <ul>
-                    {% for tt in tabletops %}
-                        <li><a href="/run_tabletop/{{ tt.id }}">{{ tt.filename }}</a></li>
+                    {% for tip in tabletop.facilitation_tips.split('-') %}
+                        {% if tip.strip() %}
+                            <li>{{ tip.strip() | safe }}</li>
+                        {% endif %}
                     {% endfor %}
                 </ul>
-            {% else %}
-                <p>No tabletop exercises available. Create one using the <code>create tabletop</code> command.</p>
-            {% endif %}
-            <a href="/">Return to Home</a>
+            </div>
+        {% else %}
+            <!-- Modal for Tabletop Selection -->
+            <div class="modal" id="tabletop-modal">
+                <div class="modal-content">
+                    <h2>Select a Tabletop Exercise</h2>
+                    {% if tabletops %}
+                        <p>Choose a tabletop exercise to begin:</p>
+                        <ul class="tabletop-list">
+                            {% for tt in tabletops %}
+                                <li><a href="/run_tabletop/{{ tt.id }}">{{ tt.filename }}</a></li>
+                            {% endfor %}
+                        </ul>
+                    {% else %}
+                        <p>No tabletop exercises available. Create one using the <code>create tabletop</code> command.</p>
+                    {% endif %}
+                    <a href="/" class="modal-button">Return to Home</a>
+                    {% if error %}
+                        <p class="error">{{ error }}</p>
+                    {% endif %}
+                </div>
+            </div>
         {% endif %}
     </div>
     {% if tabletop %}
