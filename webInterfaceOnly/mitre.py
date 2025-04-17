@@ -197,6 +197,8 @@ def search_groups(query: str) -> Optional[List[Dict[str, any]]]:
 
 def validate_id(attck_id: str, prefix: str) -> bool:
     """Validate that the ID matches the format S#### or C####"""
+    
+    attck_id = attck_id.strip().upper() 
     pattern = rf'^{prefix}\d{{4}}$'
     return bool(re.match(pattern, attck_id))
 
