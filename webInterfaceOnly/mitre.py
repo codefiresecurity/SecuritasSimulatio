@@ -136,6 +136,7 @@ def search_by_name_or_description(search_term: str) -> List[Dict[str, str]]:
 def validate_group_id(group_id: str) -> bool:
     """Validate that the group ID matches the format G####"""
     pattern = r'^G\d{4}$'
+    group_id = group_id.strip().upper()
     return bool(re.match(pattern, group_id))
 
 def search_groups(query: str) -> Optional[List[Dict[str, any]]]:
