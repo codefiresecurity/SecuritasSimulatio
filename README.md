@@ -49,6 +49,61 @@ Information in this section assumes at least Ubuntu 24.04.
     ```mysql
     mysql -h {host} -u {username} -p {database name} < schema.sql
     ```
-- 
-    
-  
+- Get enterprise-attack.json:
+    ```bash
+    https://github.com/mitre/cti/blob/master/enterprise-attack/enterprise-attack.json
+    ```
+- Examine generateGenDET.py, specifically lines **17-86** this is a generic way to generate our monitoring/DETTECT controls.
+- Run generateGenDET.py to create data-sources.yaml
+    ```bash
+    python generateGenDET.py
+    ```
+- Run detect2sql.py to read the data-source.yaml and create the sql to import into the database:
+    ```bash
+    python detect2sql.py
+    ```
+- Run mitre2sql.py to read enterprise-attack.json and generate the main sql import:
+    ```bash
+    python mitre2sql.py
+    ```
+- Import the sql files:
+    ```bash
+    mysql -h {host} -u {username} -p {database name} < mitre_full.sql
+    mysql -h {host} -u {username} -p {database name} < dettect_import.sql
+    ```
+**Configure .env File**
+- Copy .env-sample to .env and update (samples below):
+    OLLAMA_URL="http://localhost:11434"
+    DB_HOST="localhost"
+    DB_USER="user"
+    DB_PASS="password"
+    DB="mitre"
+    ENABLE_TABLETOP=true
+
+**Tweaking LLM**
+- If you want to try a different model you can modify line 239 (yes eventually it will be an env variable):
+    ```python
+    "model": "{ollama model name}"
+    ```
+
+**Running**
+- Run app.py, this will listen on port 5000. I'd recommend a reverse proxy
+  ```bash
+  python app.py
+  ```
+
+If you run into issues feel free to open an issue here or ask quesitons.
+
+# Licenses
+
+## MITRE ATT&CK Data
+The MITRE ATT&CK dataset is licensed under the Apache 2.0 License.
+Copyright (c) MITRE Corporation
+See https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+## Open-Source Libraries
+This project uses the following libraries:
+- Flask: MIT License (https://github.com/pallets/flask)
+- discord.py: MIT License (https://github.com/Rapptz/discord.py)
+- mysql-connector-python: Apache 2.0 License (https://github.com/mysql/mysql-connector-python)
+See requirements.txt for the full list.
