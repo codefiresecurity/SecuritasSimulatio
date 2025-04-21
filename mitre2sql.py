@@ -18,7 +18,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
         # Techniques
         sql_file.write("-- Create techniques table\n")
         sql_file.write("""
-            CREATE TABLE techniques (
+            CREATE TABLE IF NOT EXISTS techniques (
                 id VARCHAR(100) PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
@@ -36,7 +36,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
         # Groups
         sql_file.write("-- Create groups table\n")
         sql_file.write("""
-            CREATE TABLE groups (
+            CREATE TABLE IF NOT EXISTS groups (
                 id VARCHAR(100) PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
@@ -49,7 +49,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
         # Software
         sql_file.write("-- Create software table\n")
         sql_file.write("""
-            CREATE TABLE software (
+            CREATE TABLE IF NOT EXISTS software (
                 id VARCHAR(100) PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
@@ -63,7 +63,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
         # Campaigns
         sql_file.write("-- Create campaigns table\n")
         sql_file.write("""
-            CREATE TABLE campaigns (
+            CREATE TABLE IF NOT EXISTS campaigns (
                 id VARCHAR(100) PRIMARY KEY,
                 name VARCHAR(255) NOT NULL,
                 description TEXT,
@@ -76,7 +76,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
         # External References
         sql_file.write("-- Create external_references table (for techniques)\n")
         sql_file.write("""
-            CREATE TABLE external_references (
+            CREATE TABLE IF NOT EXISTS external_references (
                 technique_id VARCHAR(100),
                 source_name VARCHAR(100),
                 external_id VARCHAR(50),
@@ -89,7 +89,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
 
         sql_file.write("-- Create group_external_references table\n")
         sql_file.write("""
-            CREATE TABLE group_external_references (
+            CREATE TABLE IF NOT EXISTS group_external_references (
                 group_id VARCHAR(100),
                 source_name VARCHAR(100),
                 external_id VARCHAR(50),
@@ -102,7 +102,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
 
         sql_file.write("-- Create software_external_references table\n")
         sql_file.write("""
-            CREATE TABLE software_external_references (
+            CREATE TABLE IF NOT EXISTS software_external_references (
                 software_id VARCHAR(100),
                 source_name VARCHAR(100),
                 external_id VARCHAR(50),
@@ -115,7 +115,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
 
         sql_file.write("-- Create campaign_external_references table\n")
         sql_file.write("""
-            CREATE TABLE campaign_external_references (
+            CREATE TABLE IF NOT EXISTS campaign_external_references (
                 campaign_id VARCHAR(100),
                 source_name VARCHAR(100),
                 external_id VARCHAR(50),
@@ -129,7 +129,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
         # Relationship Tables
         sql_file.write("-- Create group_technique_relationships\n")
         sql_file.write("""
-            CREATE TABLE group_technique_relationships (
+            CREATE TABLE IF NOT EXISTS group_technique_relationships (
                 group_id VARCHAR(100),
                 technique_id VARCHAR(100),
                 FOREIGN KEY (group_id) REFERENCES groups (id),
@@ -142,7 +142,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
 
         sql_file.write("-- Create software_technique_relationships\n")
         sql_file.write("""
-            CREATE TABLE software_technique_relationships (
+            CREATE TABLE IF NOT EXISTS software_technique_relationships (
                 software_id VARCHAR(100),
                 technique_id VARCHAR(100),
                 FOREIGN KEY (software_id) REFERENCES software (id),
@@ -155,7 +155,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
 
         sql_file.write("-- Create campaign_technique_relationships\n")
         sql_file.write("""
-            CREATE TABLE campaign_technique_relationships (
+            CREATE TABLE IF NOT EXISTS campaign_technique_relationships (
                 campaign_id VARCHAR(100),
                 technique_id VARCHAR(100),
                 FOREIGN KEY (campaign_id) REFERENCES campaigns (id),
@@ -168,7 +168,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
 
         sql_file.write("-- Create group_campaign_relationships\n")
         sql_file.write("""
-            CREATE TABLE group_campaign_relationships (
+            CREATE TABLE IF NOT EXISTS group_campaign_relationships (
                 group_id VARCHAR(100),
                 campaign_id VARCHAR(100),
                 FOREIGN KEY (group_id) REFERENCES groups (id),
@@ -181,7 +181,7 @@ def generate_mitre_sql(json_file_path, sql_file_path="mitre_full.sql"):
 
         sql_file.write("-- Create generic relationships table\n")
         sql_file.write("""
-            CREATE TABLE relationships (
+            CREATE TABLE IF NOT EXISTS relationships (
                 source_id VARCHAR(100),
                 target_id VARCHAR(100),
                 relationship_type VARCHAR(50),
