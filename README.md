@@ -30,6 +30,7 @@ Information in this section assumes at least Ubuntu 24.04.
 - Ollama (Model in use for demo was phi3:latest)
 
 **Requirements**
+Install requirements by hand or using requirements.txt
 - pyyaml
 - requests
 - mysql-connector-python
