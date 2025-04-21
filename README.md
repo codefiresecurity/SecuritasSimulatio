@@ -2,6 +2,8 @@
 
 Web based tool to interact with data in the ATT&CK Framework as well as build and facilitate Cyber Security tabletops.
 
+If you'd like to install it yourself documentation is below. If you want to just give it a try feel free to visit: (https://adeptus.vigilocyber.com)
+
 # Command Summaries
 
 The MITRE ATT&CK chatbot supports the following commands to interact with MITRE ATT&CK data and manage tabletop exercises. Commands are case-insensitive and entered in the chat interface.
