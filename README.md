@@ -21,3 +21,34 @@ The MITRE ATT&CK chatbot supports the following commands to interact with MITRE 
 # Demo Video
 [![v0.9 demo](https://img.youtube.com/vi/10B8hbdVsE8/0.jpg)](https://youtu.be/10B8hbdVsE8)
 
+# Setup
+Information in this section assumes at least Ubuntu 24.04.
+
+**Infrastructure**
+- Python (My version was 3.13.2)
+- MySQL or MariaDB
+- Ollama (Model in use for demo was phi3:latest)
+
+**Requirements**
+- pyyaml
+- requests
+- mysql-connector-python
+- networkx
+- matplotlib
+- discord.py
+- python-dotenv
+- flask
+- Flask-Session
+- Flask-Login
+- aiohttp
+- bcrypt
+
+**Schema & Data File Creation**
+- Create database & user
+- Import schema.sql file
+    ```mysql
+    mysql -h {host} -u {username} -p {database name} < schema.sql
+    ```
+- 
+    
+  
