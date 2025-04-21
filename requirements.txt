@@ -1,0 +1,12 @@
+pyyaml
+requests
+mysql-connector-python
+networkx
+matplotlib
+discord.py
+python-dotenv
+flask
+Flask-Session
+Flask-Login
+aiohttp
+bcrypt
